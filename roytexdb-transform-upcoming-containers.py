@@ -9,6 +9,7 @@ import pandas as pd
 import os
 import pyodbc
 import sqlalchemy
+import logging
 
 
 
@@ -21,34 +22,42 @@ pd_container['ETA'] = pd_container['ETA'].fillna(method='ffill')
 pd_container['ETA'] = pd_container['ETA'].dt.date
 pd_container['CONTAINER_NBR'] = pd_container['CONTAINER_NBR'].fillna(method='ffill')
 
+pd_container.to_csv('1.csv')
+
+engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
+pd_container.to_sql(name='temp_hfc_container', con=engine, if_exists='replace', index=False)
+
+
 conn = pyodbc.connect('Driver={SQL Server};'
                   'Server=DESKTOP-5JROCDL\SQLEXPRESS;'
                   'Database=roytexdb;'
                   'Trusted_Connection=yes;')
-c = conn.cursor()   
-c.execute('''
-         create table #temp_hfc_container
-         (ETA date not null, CONTAINER_NBR varchar(15) not null, HFC_NBR varchar(6) not null, CARTON_CTN int not null)
-         ''')
+c = conn.cursor()  
 
-engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
-pd_container.to_sql(name='temp_hfc_container', con=engine, if_exists='append', index=False)
+#c.execute('''
+#         create table #temp_hfc_container
+#         (ETA date not null, CONTAINER_NBR varchar(15) not null, HFC_NBR varchar(6) not null, CARTON_CTN int not null)
+#         ''')
 
-c.execute('''
-          MERGE DBO.HFC_CONTAINER AS T
-          USING temp_hfc_container AS S
-          ON (T.HFC_NBR = S.HFC_NBR and T.CONTAINER_NBR = S.CONTAINER_NBR)
-          WHEN MATCHED THEN
-          UPDATE SET T.ETA = S.ETA, T.CARTON_CTN=S.CARTON_CTN
-          WHEN NOT MATCHED BY TARGET THEN
-          INSERT (HFC_NBR, CONTAINER_NBR, ETA, CARTON_CTN) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.ETA, S.CARTON_CTN);
-          ''')
-
-c.execute('''drop table temp_hfc_container;''')
-
-conn.commit()
-conn.close()
-
+try:
+    c.execute('''
+              MERGE DBO.HFC_CONTAINER AS T
+              USING temp_hfc_container AS S
+              ON (T.HFC_NBR = S.HFC_NBR and T.CONTAINER_NBR = S.CONTAINER_NBR)
+              WHEN MATCHED THEN
+              UPDATE SET T.ETA = S.ETA, T.CARTON_CTN=S.CARTON_CTN
+              WHEN NOT MATCHED BY TARGET THEN
+              INSERT (HFC_NBR, CONTAINER_NBR, ETA, CARTON_CTN) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.ETA, S.CARTON_CTN);
+              ''')
+    c.execute('''drop table temp_hfc_container;''')
+    conn.commit()
+    conn.close()
+except Exception as e:
+#    c.execute('''drop table temp_hfc_container;''')
+#    conn.commit()
+    logger = logging.Logger('Catch_All')
+    logger.error(str(e))
+    conn.close()
 
 
 
