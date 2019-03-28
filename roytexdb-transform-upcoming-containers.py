@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Feb  1 10:10:59 2019
-
 @author: PBu
-
+STATEMENT OF PURPOSE:
+this program uploads the UPCOMING CONTAINERS excel file received in email from Glenda every Friday into SQL table HFC_CONTAINER
+Note: save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\UPCOMING_CONTAINERS.xlsx'
 """
 
 import pandas as pd
 import numpy as np
-import pyodbc
+#import pyodbc
 import sqlalchemy
 import logging
 import sys
@@ -76,39 +76,67 @@ Quality control#4:
 Once HFC_CONTAINER table updated, read updated total carton count by container and compare it to the original pd_container_ttl table
 if different, raise error 
 """
-pd_container.to_sql(name='temp_hfc_container', con=engine, if_exists='replace', index=False)
-pd_container_ttl.to_sql(name='temp_container_ttl', con=engine, if_exists='replace', index=False)
+conn = engine.connect()
+pd_container.to_sql(name='#temp_hfc_container', con=conn, if_exists='replace', index=False)
 
-conn = pyodbc.connect('Driver={SQL Server};'
-                  'Server=DESKTOP-5JROCDL\SQLEXPRESS;'
-                  'Database=roytexdb;'
-                  'Trusted_Connection=yes;')
-c = conn.cursor()  
-
+trans = conn.begin()
 try:
-    c.execute('''
-              MERGE DBO.HFC_CONTAINER AS T
-              USING temp_hfc_container AS S
-              ON (T.HFC_NBR = S.HFC_NBR and T.CONTAINER_NBR = S.CONTAINER_NBR)
-              WHEN MATCHED THEN
-              UPDATE SET T.CARTON_CTN=S.CARTON_CTN, T.ETA=S.ETA
-              WHEN NOT MATCHED BY TARGET THEN
-              INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA);
-              ''')
-    c.execute('''drop table temp_hfc_container;''')
-    after_update = '''
-                   SELECT CONTAINER_NBR, ETA, SUM (CARTON_CTN) AS TTL_CARTON 
-                   FROM DBO.HFC_CONTAINER WHERE CONTAINER_NBR IN (SELECT DISTINCT CONTAINER_NBR FROM dbo.temp_container_ttl)
-                   GROUP BY CONTAINER_NBR, ETA
-                   '''
-    pd_container_ttl_after = pd.read_sql(after_update, conn)
-    c.execute('''drop table temp_container_ttl;''')
-    conn.commit()
-    conn.close()
+    conn.execute("""MERGE DBO.HFC_CONTAINER AS T 
+                 USING dbo.#temp_hfc_container AS S 
+                 ON (T.HFC_NBR = S.HFC_NBR and T.CONTAINER_NBR = S.CONTAINER_NBR) 
+                 WHEN MATCHED THEN UPDATE SET T.CARTON_CTN=S.CARTON_CTN, T.ETA=S.ETA 
+                 WHEN NOT MATCHED BY TARGET THEN 
+                 INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA);""")
+    trans.commit()
 except Exception as e:
     logger = logging.Logger('Catch_All')
     logger.error(str(e))
+    trans.rollback()
     conn.close()
+    engine.dispose()
+
+pd_container_ttl.to_sql(name='#temp_container_ttl', con=conn, if_exists='replace', index=False)
+after_update = '''
+               SELECT CONTAINER_NBR, ETA, SUM (CARTON_CTN) AS TTL_CARTON 
+               FROM DBO.HFC_CONTAINER WHERE CONTAINER_NBR IN (SELECT DISTINCT CONTAINER_NBR FROM dbo.#temp_container_ttl)
+               GROUP BY CONTAINER_NBR, ETA
+               '''  
+pd_container_ttl_after = pd.read_sql(after_update, con=conn)
+
+conn.close()
+engine.dispose()
+
+#                        
+#conn = pyodbc.connect('Driver={SQL Server};'
+#                  'Server=DESKTOP-5JROCDL\SQLEXPRESS;'
+#                  'Database=roytexdb;'
+#                  'Trusted_Connection=yes;')
+#c = conn.cursor()  
+#
+#try:
+#    c.execute('''
+#              MERGE DBO.HFC_CONTAINER AS T
+#              USING temp_hfc_container AS S
+#              ON (T.HFC_NBR = S.HFC_NBR and T.CONTAINER_NBR = S.CONTAINER_NBR)
+#              WHEN MATCHED THEN
+#              UPDATE SET T.CARTON_CTN=S.CARTON_CTN, T.ETA=S.ETA
+#              WHEN NOT MATCHED BY TARGET THEN
+#              INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA);
+#              ''')
+#    c.execute('''drop table temp_hfc_container;''')
+#    after_update = '''
+#                   SELECT CONTAINER_NBR, ETA, SUM (CARTON_CTN) AS TTL_CARTON 
+#                   FROM DBO.HFC_CONTAINER WHERE CONTAINER_NBR IN (SELECT DISTINCT CONTAINER_NBR FROM dbo.temp_container_ttl)
+#                   GROUP BY CONTAINER_NBR, ETA
+#                   '''
+#    pd_container_ttl_after = pd.read_sql(after_update, conn)
+#    c.execute('''drop table temp_container_ttl;''')
+#    conn.commit()
+#    conn.close()
+#except Exception as e:
+#    logger = logging.Logger('Catch_All')
+#    logger.error(str(e))
+#    conn.close()
 
 pd_container_ttl_after['ETA'] = pd_container_ttl_after['ETA'].apply(lambda x: datetime.strptime(x, '%Y-%m-%d').date())
 pd_validate = pd.merge(pd_container_ttl, pd_container_ttl_after, how='left', 
@@ -118,6 +146,8 @@ for n in range(pd_validate.shape[0]):
         print ('WARNING: Container ' + pd_validate['CONTAINER_NBR'][n] + ' with ETA ' + pd_validate['ETA'][n].strftime('%Y-%m-%d') + ' has error!')
         sys.exit('FIX ABOVE MENTIONED ERROR(S)')
 
+
 print ('UPDATE COMPLETED SUCCESSFULLY!')
+
 
 
