@@ -3,7 +3,7 @@
 @author: PBu
 STATEMENT OF PURPOSE:
 this program uploads the UPCOMING CONTAINERS excel file received in email from Glenda every Friday into SQL table HFC_CONTAINER
-Note: save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\UPCOMING_CONTAINERS.xlsx'
+Note: save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx'
 """
 
 import pandas as pd
@@ -20,7 +20,7 @@ from datetime import datetime
 from excel source create a dataframe that maps to HFC_CONTAINER table
 data quality control#1: no null HFC
 """
-pd_container = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
+pd_container = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
                              usecols=[2,3,4,5],names=['ETA', 'CONTAINER_NBR', 'HFC_NBR', 'CARTON_CTN'], converters={1: np.str, 2: np.str, 3: np.int32})
 pd_container = pd_container.iloc[:-1]
 
@@ -54,7 +54,7 @@ if sum(~pd_container['HFC_NBR'].isin(pd_valid_hfc['HFC_NBR'])) > 0:
 from the same excel source create a dataframe that gets total carton count by container
 data quality control#3: container number fits format ^[A-Z]{4}[0-9]{7}$ if it's not AIR
 """
-pd_container_ttl = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
+pd_container_ttl = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
                              usecols=[2,3,6],names=['ETA', 'CONTAINER_NBR', 'TTL_CTN'])
 pd_container_ttl = pd_container_ttl.iloc[:-1]
 pd_container_ttl.dropna(inplace=True)
