@@ -1,119 +1,73 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Oct 12 15:48:50 2018
-
 @author: PBu
+STATEMENT OF PURPOSE:
+    Run this program will read the 'SOURCE_BUYSUMMARY.csv' file located in the ROYTEXDB folder and upload it into SQL table HFC_HEADER
+Note: this program will generate an ExceptionReport for 'mixed prepack' (i.e. prepack with two styles in one carton). 
+      Any HFC in the exception report will have the size scale changed to 'Z9' assorted sizes
+      User should review the offloaded Excel report '''ExceptionReport_HFC_HEADER.xlsx''' before choosing 'Y' or 'N' to proceed
+PREREQUISITE: 
+    SQL tables CUSTOMER and SIZE_SCALE have to be loaded before running this program
 """
 import pandas as pd
-import numpy as np
 import sqlalchemy
 import sys
-import datetime
 import os
 import logging
 
 engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
 conn = engine.connect()
-masterdir = "U:\\ROYTEX PO'S\\SPRING 2018 PO'S\\DIV # "
+os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
 
-def readHFCHeader (raw_hfc):
-    """
-    input: raw dataframe read from an excel HFC
-    output: a list with HFC header info that matches the SQL table HFC_HEADER 
-    """
-    hfc_nbr = str(raw_hfc.iloc[2,2]).zfill(6)
-    print('processing HFC ', hfc_nbr)
-    
-    div = raw_hfc.iloc[6,2]
-    
-    try:
-        ship_date = raw_hfc.iloc[12,2].date()
-    except:
-        ship_date = datetime.date(1900, 1,1)
-    
-    try:
-        x_orient = raw_hfc.iloc[10,2].date()
-    except:
-        x_orient = datetime.date(1900, 1,1)
-    
-    if raw_hfc.iloc[8,16].replace(' ', '') == '(X)':
-        cat = 'K'
-    elif raw_hfc.iloc[9,16].replace(' ', '') == '(X)':
-        cat = 'W'
-    else:
-        cat = '?'
-    
-    try:
-        cust_nbr = raw_hfc.iloc[2,10].split(':')[0]
-    except:
-        cust_nbr = '0'
-    
-    if 'E-COM' in raw_hfc.iloc[2,10] or 'ECOM' in raw_hfc.iloc[2,10] or '.COM' in raw_hfc.iloc[2,10]:
-        is_ecom = 1
-    else:
-        is_ecom = 0
-    
-    agent = raw_hfc.iloc[11, 16]
-    
-    maker = raw_hfc.iloc[13, 16]
-    
-    coo = raw_hfc.iloc[17, 15]
-    
-    try:
-        ssn = raw_hfc.iloc[2,7].split(':')[-1].strip()[:2] + '-' + raw_hfc.iloc[2,7].split(':')[-1].strip()[-2:]
-    except:
-        ssn = ''
-    
-    try:
-        carton_size = int(raw_hfc.iloc[8,11].split(':')[1].strip()[:-1])
-    except:
-        carton_size = 0
-    
-    try:
-        hfc_size_scale_code = str(raw_hfc.iloc[3,7]).split('/')[0]
-    except:
-        hfc_size_scale_code = ''
-    
-    return [hfc_nbr, div, ship_date, x_orient, cat, cust_nbr, is_ecom, agent, maker, coo, ssn, carton_size, hfc_size_scale_code]
+# read SOURCE_BUYSUMMARY into POHeader dataframe
+POheader = pd.read_csv('SOURCE_BUYSUMMARY.csv', skiprows=1, header=None, usecols=[0, 2, 3, 4, 6, 10, 15, 35, 37, 39, 40], names=['DIV', 'CUST_NBR', 'SSN', 'HFC', 'X_ORIENT', 'X_SHIP', 'CAT', 'AGENT', 'COO', 'CARTON_SIZE', 'HFC_SIZE_SCALE'])
+POheader.drop_duplicates(subset='HFC', keep='first', inplace=True)
+POheader['CUST_NBR'] = POheader['CUST_NBR'].apply(lambda x: str(x).zfill(5))
+POheader['HFC'] = POheader['HFC'].apply(lambda x: str(x).zfill(6))
+POheader['HFC_SIZE_SCALE'] = POheader['HFC_SIZE_SCALE'].apply(lambda x: str(x).zfill(2))
+POheader.reset_index(drop=True, inplace=True)
 
+# read from SQL SIZE_SCALE table qty by size_scale
+readSizeScale = "select SIZE_SCALE_CODE, (S1_QTY + S2_QTY +S3_QTY +S4_QTY +S5_QTY +S6_QTY +S7_QTY +S8_QTY) as TTL_QTY from dbo.SIZE_SCALE"
+sizeScale = pd.read_sql_query(readSizeScale, con=conn)
 
-def updateHFCHeader(masterdir):
-    poHeaderls = []
-    for n in range(10):
-        subdir = masterdir + str(n+1)
-        files = os.listdir(subdir)
-        for each in files:
-            if each[-4:] == '.xls' and each[-10:-4].upper() != 'CANCEL':
-                raw_hfc = pd.read_excel(subdir+"\\"+each)
-                poHeaderls.append(readHFCHeader(raw_hfc))
-    
-    poHeaderdf = pd.DataFrame(poHeaderls)            
-    poHeaderdf.columns = ['hfc_nbr', 'div', 'ship_date', 'x_orient', 'cat', 'cust_nbr', 'is_ecom', 'agent', 'maker', 'coo', 'ssn', 'carton_size', 'hfc_size_scale_code']
-    poHeaderdf.to_sql(name='#temp_hfc_header', con=conn, if_exists='replace', index=False)
-    
-    trans = conn.begin()
-    try:
-        conn.execute("""MERGE DBO.HFC_HEADER AS T 
-                     USING dbo.#temp_hfc_header AS S 
-                     ON T.HFC_NBR = S.hfc_nbr 
-                     WHEN MATCHED THEN UPDATE
-                     SET T.SHIP_DATE = S.ship_date, T.SEASON=S.ssn, T.DIV=S.div, T.CUST_NBR = S.cust_nbr, T.CARTON_SIZE = S.carton_size, T.X_ORIENT = S.x_orient, T.AGENT = S.agent, T.COO = S.coo, T.IS_ECOM = S.is_ecom, T.MAKER=S.maker, T.HFC_SIZE_SCALE_CODE = S.hfc_size_scale_code, T.CAT=S.cat, T.CXL = 0 
-                     WHEN NOT MATCHED BY TARGET THEN 
-                     INSERT (HFC_NBR, SHIP_DATE, SEASON, DIV, CUST_NBR, CARTON_SIZE, X_ORIENT, AGENT, COO, IS_ECOM, MAKER, HFC_SIZE_SCALE_CODE, CAT) VALUES
-                     (S.hfc_nbr, S.ship_date, S.ssn, S.div, S.cust_nbr, S.carton_size, S.x_orient, S.agent, S.coo, S.is_ecom, S.maker, S.hfc_size_scale_code, S.cat)
-                     WHEN NOT MATCHED BY SOURCE AND T.SEASON IN (select distinct ssn from #temp_hfc_header) THEN
-                     UPDATE SET T.CXL = 1;""")
-        trans.commit()        
-        print ('UPDATE COMPLETED SUCCESSFULLY!')
-    except Exception as e:
-        logger = logging.Logger('Catch_All')
-        logger.error(str(e))
-        trans.rollback()
-        conn.close()
-        engine.dispose()
+# filter in POheader how many prepack HFC's have carton size not matching size scale qty. 
+POheader2 = pd.merge(POheader, sizeScale, how='left', left_on='HFC_SIZE_SCALE', right_on='SIZE_SCALE_CODE')
+POheader2['PPK_DIFF'] = POheader2['CARTON_SIZE'] - POheader2['TTL_QTY']
+exception = POheader2[(POheader2['HFC_SIZE_SCALE'] != '00') & (POheader2['PPK_DIFF'] != 0)]
+exception.to_excel('ExceptionReport_HFC_HEADER.xlsx', index=False)
 
-updateHFCHeader(masterdir)
-#x = pd.read_excel("U:\ROYTEX PO'S\SPRING 2018 PO'S\DIV # 10\\085001 - SS PY-600.xls")
-a = 'CANCELLED PO'
-print ('CANCEL' in a)
-   
+#ask use to verify the exception report and pick 'Y' or 'N'. 'Y' to proceed to change those not matching to 'Z9' size scale and upload to SQL. 'N' to abort
+x = str(input("EXCEPTION REPORT 'ExceptionReport_HFC_HEADER.xlsx' OFFLOADED. IS IT OKAY TO PROCEED? ENTER 'Y' OR 'N' "))
+if x.upper() == 'Y':
+    exceptionls = exception.index.tolist()
+    for n in range(len(exceptionls)):
+        POheader.at[exceptionls[n], 'HFC_SIZE_SCALE'] = 'Z9'
+else:
+    sys.exit('PROGRAM STOPPED')
+
+# upload data in POheader df into SQL  
+POheader.to_sql('#temp_hfc_header', con=conn, if_exists='replace', index=False)
+trans = conn.begin()
+try:
+    conn.execute("""MERGE DBO.HFC_HEADER AS T 
+                 USING dbo.#temp_hfc_header AS S 
+                 ON T.HFC_NBR = S.HFC 
+                 WHEN MATCHED THEN UPDATE
+                 SET T.SHIP_DATE = S.X_SHIP, T.SEASON=S.SSN, T.DIV=S.DIV, T.CUST_NBR = S.CUST_NBR, T.CARTON_SIZE = S.CARTON_SIZE, T.X_ORIENT = S.X_ORIENT, T.AGENT = S.AGENT, T.COO = S.COO, T.HFC_SIZE_SCALE_CODE = S.HFC_SIZE_SCALE, T.CAT=S.CAT 
+                 WHEN NOT MATCHED BY TARGET THEN 
+                 INSERT (HFC_NBR, SHIP_DATE, SEASON, DIV, CUST_NBR, CARTON_SIZE, X_ORIENT, AGENT, COO, HFC_SIZE_SCALE_CODE, CAT) VALUES
+                 (S.HFC, S.X_SHIP, S.SSN, S.DIV, S.CUST_NBR, S.CARTON_SIZE, S.X_ORIENT, S.AGENT, S.COO, S.HFC_SIZE_SCALE, S.CAT)
+                 WHEN NOT MATCHED BY SOURCE AND T.SEASON IN (select distinct SSN from #temp_hfc_header) THEN
+                 DELETE;""")
+    trans.commit()
+    conn.close()
+    engine.dispose()          
+    print ('UPDATE COMPLETED SUCCESSFULLY!')
+except Exception as e:
+    logger = logging.Logger('Catch_All')
+    logger.error(str(e))
+    trans.rollback()
+    conn.close()
+    engine.dispose()
+
