@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Mar 29 14:53:26 2019
-
 @author: PBu
+STATEMENT OF PURPOSE:
+    Run this program will read the 'SOURCE_SIZE_RANGE_MASTER.csv' file located in ROYTEXDB folder and upload it into SQL table SIZE_RANGE
+PREREQUISITE:
+    None
 """
 
 import pandas as pd
