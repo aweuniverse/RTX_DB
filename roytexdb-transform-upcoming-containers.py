@@ -2,8 +2,10 @@
 """
 @author: PBu
 STATEMENT OF PURPOSE:
-this program uploads the UPCOMING CONTAINERS excel file received in email from Glenda every Friday into SQL table HFC_CONTAINER
+    this program uploads the UPCOMING CONTAINERS excel file received in email from Glenda every Friday into SQL table HFC_CONTAINER
 Note: save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx'
+PREREQUISITE:
+    SQL table HFC_HEADER has to be loaded before running this program
 """
 
 import pandas as pd
