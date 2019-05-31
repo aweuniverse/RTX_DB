@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Aug 28 16:07:02 2018
-
 @author: PBu
+STATEMENT OF PURPOSE:
+    Run this program will read the 'SOURCE_STYLE_MASTER.csv' file located in ROYTEXDB folder and upload it into SQL table STYLE_MASTER
+    It will also udpate manually maintained 'SOURCE_STYLE_MASTER_SLV_AND_SIZE.csv' as complementary info into STYLE_MASTER
+PREREQUISITE:
+    SQL table SIZE_RANGE has to be loaded before running this program
 """
-   
+
 import pandas as pd
 import numpy as np
 import sqlalchemy
@@ -17,30 +20,33 @@ df_style = pd.read_csv('W:\Roytex - The Method\Ping\ROYTEXDB\SOURCE_STYLE_MASTER
 
 df_style['STYLE'] = df_style['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
 df_style['OPEN_SSN'] = df_style['OPEN_SSN'].apply(lambda x: x.upper())
-df_style['CAT'] = df_style['STYLE_DESC'].apply(lambda x: 'K' if ' KS ' in x or ' KL ' in x else ('W' if ' WS ' in x or ' WL ' in x else ''))
-df_style['SLV'] = df_style['STYLE_DESC'].apply(lambda x: 'L' if ' KL ' in x or ' WL ' in x else ('S' if ' WS ' in x or ' KS ' in x else ''))
+#df_style['CAT'] = df_style['STYLE_DESC'].apply(lambda x: '' if type(x)==np.float else 'K' if ' KS ' in x or ' KL ' in x else ('W' if ' WS ' in x or ' WL ' in x else ''))
+df_style['SLV'] = df_style['STYLE_DESC'].apply(lambda x: '' if type(x)==np.float else 'L/S' if ' KL ' in x or ' WL ' in x else ('S/S' if ' WS ' in x or ' KS ' in x else ''))
 
+slvAndSize = pd.read_csv('W:\Roytex - The Method\Ping\ROYTEXDB\SOURCE_STYLE_MASTER_SLV_AND_SIZE.csv', converters={0:str})
+slvAndSize['STYLE'] = slvAndSize['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
 
 engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
 conn = engine.connect()
 df_style.to_sql(name='#temp_style', con=conn, if_exists='replace', index=False)
+slvAndSize.to_sql(name='#temp_slv_and_size', con=conn, if_exists='replace', index=False)
+                  
 trans = conn.begin()
-
-
 try:
     conn.execute("""MERGE DBO.STYLE_MASTER AS T 
                  USING dbo.#temp_style AS S 
-                 ON T.STYLE = S.STYLE 
+                 ON T.STYLE = S.STYLE
                  WHEN MATCHED THEN UPDATE 
-                 SET T.STYLE_DESC = S.STYLE_DESC, T.DIV=S.DIV, T.PROTO=S.PROTO, T.SIZE_RANGE_CODE = S.SIZE_RANGE, 
+                 SET T.STYLE_DESC = S.STYLE_DESC, T.DIV=S.DIV, T.PROTO=S.PROTO, T.SIZE_RANGE_CODE = S.SIZE_RANGE, T.SLV = S.SLV,
                  T.OPEN_SSN = S.OPEN_SSN, T.OPEN_YEAR = S.OPEN_YR, T.LABEL_CODE=S.LABEL, 
-                 T.SP=S.SP, T.ELC=S.ELC, T.ILC=S.ILC, T.CAT=S.CAT, T.SLV=S.SLV, T.BRAND_NAME=S.BRAND_NAME, 
+                 T.SP=S.SP, T.ELC=S.ELC, T.ILC=S.ILC, T.BRAND_NAME=S.BRAND_NAME, 
                  T.FABRIC=S.FABRIC, T.ROYALTY = S.ROYALTY, T.PPK = S.PPK, T.CXL=0
                  WHEN NOT MATCHED BY TARGET THEN 
-                 INSERT (STYLE, STYLE_DESC, DIV, PROTO, SIZE_RANGE_CODE, OPEN_SSN, OPEN_YEAR, CAT, SLV, ILC, ELC, SP, LABEL_CODE, BRAND_NAME, FABRIC, ROYALTY, PPK) 
-                 VALUES (S.STYLE, S.STYLE_DESC, S.DIV, S.PROTO, S.SIZE_RANGE, S.OPEN_SSN, S.OPEN_YR, S.CAT, S.SLV, S.ILC, S.ELC, S.SP, S.LABEL, S.BRAND_NAME, S.FABRIC, S.ROYALTY, S.PPK)
+                 INSERT (STYLE, STYLE_DESC, DIV, PROTO, SIZE_RANGE_CODE, OPEN_SSN, OPEN_YEAR, ILC, ELC, SP, SLV, LABEL_CODE, BRAND_NAME, FABRIC, ROYALTY, PPK) 
+                 VALUES (S.STYLE, S.STYLE_DESC, S.DIV, S.PROTO, S.SIZE_RANGE, S.OPEN_SSN, S.OPEN_YR, S.ILC, S.ELC, S.SP, S.SLV, S.LABEL, S.BRAND_NAME, S.FABRIC, S.ROYALTY, S.PPK)
                  WHEN NOT MATCHED BY SOURCE THEN
                  UPDATE SET T.CXL = 1;""")
+    conn.execute("""update T set T.REG_BT = S.SIZE, T.SLV = S.SLV from #temp_slv_and_size as S inner join dbo.STYLE_MASTER as T on T.STYLE=S.STYLE""")
     trans.commit()
     conn.close()
     engine.dispose()
