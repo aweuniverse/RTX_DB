@@ -32,6 +32,7 @@ if sum(pd_container['HFC_NBR'].isnull()) > 0:
 
 pd_container['HFC_NBR'] = pd_container['HFC_NBR'].apply(lambda x:x.zfill(6))
 pd_container['CONTAINER_NBR'] = pd_container['CONTAINER_NBR'].fillna(method='ffill')
+pd_container['CONTAINER_NBR'] = pd_container['CONTAINER_NBR'].apply(lambda x: x.upper())
 pd_container['ETA'] = pd_container['ETA'].fillna(method='ffill')
 pd_container['ETA'] = pd_container['ETA'].dt.date
 pd_container.reset_index(drop=True, inplace=True)
@@ -61,11 +62,12 @@ pd_container_ttl = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURC
 pd_container_ttl = pd_container_ttl.iloc[:-1]
 pd_container_ttl.dropna(inplace=True)
 pd_container_ttl['ETA'] = pd_container_ttl['ETA'].dt.date
+pd_container_ttl['CONTAINER_NBR'] = pd_container_ttl['CONTAINER_NBR'].apply(lambda x: x.upper())
 pd_container_ttl.reset_index(drop=True, inplace=True)
 
 pattern = re.compile('^[A-Z]{4}[0-9]{7}$')
 for n in range(pd_container_ttl.shape[0]):
-    if pd_container_ttl['CONTAINER_NBR'][n] != 'AIR':
+    if (pd_container_ttl['CONTAINER_NBR'][n] != 'AIR') and (pd_container_ttl['CONTAINER_NBR'][n] != 'FEDEX'):
         if not pattern.match(pd_container_ttl['CONTAINER_NBR'][n]):
             print ('WARNING: CONTAINER NBR '+ pd_container_ttl['CONTAINER_NBR'][n] + ' is invalid!')
             sys.exit('FIX ABOVE MENTIONED ERROR(S)')
