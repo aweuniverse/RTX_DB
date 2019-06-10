@@ -54,12 +54,12 @@ try:
                  USING dbo.#temp_hfc_header AS S 
                  ON T.HFC_NBR = S.HFC 
                  WHEN MATCHED THEN UPDATE
-                 SET T.SHIP_DATE = S.X_SHIP, T.SEASON=S.SSN, T.DIV=S.DIV, T.CUST_NBR = S.CUST_NBR, T.CARTON_SIZE = S.CARTON_SIZE, T.X_ORIENT = S.X_ORIENT, T.AGENT = S.AGENT, T.COO = S.COO, T.HFC_SIZE_SCALE_CODE = S.HFC_SIZE_SCALE, T.CAT=S.CAT 
+                 SET T.SHIP_DATE = S.X_SHIP, T.SEASON=S.SSN, T.DIV=S.DIV, T.CUST_NBR = S.CUST_NBR, T.CARTON_SIZE = S.CARTON_SIZE, T.X_ORIENT = S.X_ORIENT, T.AGENT = S.AGENT, T.COO = S.COO, T.HFC_SIZE_SCALE_CODE = S.HFC_SIZE_SCALE, T.CAT=S.CAT, T.CXL=0 
                  WHEN NOT MATCHED BY TARGET THEN 
                  INSERT (HFC_NBR, SHIP_DATE, SEASON, DIV, CUST_NBR, CARTON_SIZE, X_ORIENT, AGENT, COO, HFC_SIZE_SCALE_CODE, CAT) VALUES
                  (S.HFC, S.X_SHIP, S.SSN, S.DIV, S.CUST_NBR, S.CARTON_SIZE, S.X_ORIENT, S.AGENT, S.COO, S.HFC_SIZE_SCALE, S.CAT)
                  WHEN NOT MATCHED BY SOURCE AND T.SEASON IN (select distinct SSN from #temp_hfc_header) THEN
-                 DELETE;""")
+                 UPDATE SET T.CXL=1;""")
     trans.commit()
     conn.close()
     engine.dispose()          

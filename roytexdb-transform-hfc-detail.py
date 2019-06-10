@@ -36,18 +36,18 @@ def readBuySummary():
     POdetail['HFC'] = POdetail['HFC'].apply(lambda x: str(x).zfill(6))
     POdetail['HFC_LINE_SIZE_SCALE'] = POdetail['HFC_LINE_SIZE_SCALE'].apply(lambda x: str(x).zfill(2))
 
-    ###########OPTIONAL CODE BEGINS: to fix data issue in Spring '19 JCP
-    ###########OPTIONAL CODE BEGINS: to fix data issue in Spring '19 JCP
-    ###########OPTIONAL CODE BEGINS: to fix data issue in Spring '19 JCP
-    #REMEMBER TO DEACTIVATE THIS SECTION OF CODE WHEN BUY SUMMARY NO LONGER CONTAINS SP-19
+    ##########OPTIONAL CODE BEGINS: to fix data issue in Spring '19 JCP
+    ##########OPTIONAL CODE BEGINS: to fix data issue in Spring '19 JCP
+    ##########OPTIONAL CODE BEGINS: to fix data issue in Spring '19 JCP
+    ###REMEMBER TO DEACTIVATE THIS SECTION OF CODE WHEN BUY SUMMARY NO LONGER CONTAINS SP-19
     x = POdetail[POdetail['STYLE']=='637759']
     y = pd.pivot_table(x, values=['UNITS'], index=['HFC', 'STYLE', 'COLOR'], aggfunc=sum).reset_index()
     POdetail.drop_duplicates(subset=['HFC', 'STYLE', 'COLOR'], inplace=True)
     for n in range(y.shape[0]):
         POdetail.at[POdetail[(POdetail['HFC'] == y['HFC'][n]) & (POdetail['STYLE']=='637759')].index.values.astype(int)[0], 'UNITS'] = y['UNITS'][n]
-    ##################OPTIONAL CODE ENDS#########################
-    ##################OPTIONAL CODE ENDS#########################
-    ##################OPTIONAL CODE ENDS#########################
+    #################OPTIONAL CODE ENDS#########################
+    #################OPTIONAL CODE ENDS#########################
+    #################OPTIONAL CODE ENDS#########################
     
     POdetail.to_sql('#temp_hfc_detail', con=conn, if_exists='replace', index=False)
     trans = conn.begin()
@@ -56,13 +56,13 @@ def readBuySummary():
                      USING dbo.#temp_hfc_detail AS S 
                      ON (T.HFC_NBR = S.HFC and T.STYLE = S.STYLE and T.COLOR_CODE = S.COLOR)
                      WHEN MATCHED THEN UPDATE
-                     SET T.COLOR_DESC = S.COLOR_DESC, T.HFC_LINE_SIZE_SCALE_CODE=S.HFC_LINE_SIZE_SCALE, T.ASST=S.ASST, T.FOB = S.FOB, T.ELC = S.ELC, T.SP = S.SP, T.MSRP = S.MSRP, T.TTL_QTY = S.UNITS 
+                     SET T.COLOR_DESC = S.COLOR_DESC, T.HFC_LINE_SIZE_SCALE_CODE=S.HFC_LINE_SIZE_SCALE, T.ASST=S.ASST, T.FOB = S.FOB, T.ELC = S.ELC, T.SP = S.SP, T.MSRP = S.MSRP, T.TTL_QTY = S.UNITS, T.CXL=0 
                      WHEN NOT MATCHED BY TARGET THEN 
                      INSERT (HFC_NBR, STYLE, COLOR_CODE, COLOR_DESC, HFC_LINE_SIZE_SCALE_CODE, ASST, FOB, ELC, SP, MSRP, TTL_QTY) VALUES
                      (S.HFC, S.STYLE, S.COLOR, S.COLOR_DESC, S.HFC_LINE_SIZE_SCALE, S.ASST, S.FOB, S.ELC, S.SP, S.MSRP, S.UNITS)
                      WHEN NOT MATCHED BY SOURCE AND 
                      ((select SEASON from dbo.HFC_HEADER where HFC_NBR = T.HFC_NBR) IN (select distinct SSN from #temp_hfc_detail)) THEN
-                     DELETE;""")
+                     UPDATE SET T.CXL=1;""")
         trans.commit()         
         print ('BUY SUMMARY UPDATE COMPLETED SUCCESSFULLY!')
         conn.close()
@@ -107,7 +107,7 @@ def reviewSizeBreak():
     ### review all but DIV 8 and VARIOUS HFC's
     sqlcheck = '''
                 select H.SEASON, D.HFC_NBR, D.STYLE, D.COLOR_CODE, D.TTL_QTY, SUM(D.S1_QTY)+SUM(D.S2_QTY)+SUM(D.S3_QTY)+SUM(D.S4_QTY)+SUM(D.S5_QTY)+SUM(D.S6_QTY)+SUM(D.S7_QTY)+SUM(D.S8_QTY) as TTL_SIZE_BREAK
-                from dbo.HFC_DETAIL D join dbo.HFC_HEADER H on D.HFC_NBR=H.HFC_NBR where  H.DIV <> 8 and H.CUST_NBR<>'87700' GROUP BY H.SEASON, D.HFC_NBR, D.STYLE, D.COLOR_CODE, D.TTL_QTY
+                from dbo.HFC_DETAIL D join dbo.HFC_HEADER H on D.HFC_NBR=H.HFC_NBR where  H.DIV <> 8 and H.CUST_NBR<>'87700' and D.CXL = 0 GROUP BY H.SEASON, D.HFC_NBR, D.STYLE, D.COLOR_CODE, D.TTL_QTY
                 '''
     POcheck = pd.read_sql(sqlcheck, con=conn)
     conn.close()
@@ -121,8 +121,7 @@ def reviewSizeBreak():
 
 os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
 readBuySummary()
-#readBuySizeBreak('SOURCE_BUY_FA-18.csv')
+#readBuySizeBreak('SOURCE_BUY_SP-18.csv')
 #readBuySizeBreak('SOURCE_BUY_SP-19.csv')
-readBuySizeBreak('SOURCE_BUY_FA-19_1.csv')
-readBuySizeBreak('SOURCE_BUY_FA-19_2.csv')
+#readBuySizeBreak('SOURCE_BUY_FA-19_3.csv')
 reviewSizeBreak()
