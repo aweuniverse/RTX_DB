@@ -16,10 +16,11 @@ import logging
 df_style = pd.read_csv('W:\Roytex - The Method\Ping\ROYTEXDB\SOURCE_STYLE_MASTER.csv', header=None,
                             names=['STYLE', 'STYLE_DESC', 'PROTO', 'SIZE_RANGE', 'OPEN_SSN', 'OPEN_YR', 'DIV', 'LABEL', 'SP', 'ELC', 'ILC', 'BRAND_NAME', 'FABRIC', 'ROYALTY', 'PPK' ],
                             usecols=[1, 2, 3, 4, 5, 6, 7,8, 11, 12, 13, 15, 16, 30, 34], skiprows=2, 
-                            dtype={'STYLE': str, 'STYLE_DESC':str, 'PROTO':str, 'SIZE_RANGE':str, 'OPEN_SSN':str, 'OPEN_YR':np.int, 'DIV': np.int, 'LABEL':str, 'SP':np.float64, 'ELC':np.float64, 'ILC': np.float64, 'BRAND_NAME':str, 'FABRIC':str, 'ROYALTY':np.float64, 'PPK':str })
+                            dtype={'STYLE': str, 'STYLE_DESC':str, 'PROTO':str, 'SIZE_RANGE':str, 'OPEN_SSN':str, 'OPEN_YR':str, 'DIV': np.int, 'LABEL':str, 'SP':np.float64, 'ELC':np.float64, 'ILC': np.float64, 'BRAND_NAME':str, 'FABRIC':str, 'ROYALTY':np.float64, 'PPK':str })
 
 df_style['STYLE'] = df_style['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
-df_style['OPEN_SSN'] = df_style['OPEN_SSN'].apply(lambda x: x.upper())
+df_style['SEASON'] = df_style.apply(lambda row: 'SP-' + row.OPEN_YR[-2:] if row.OPEN_SSN.upper() == 'S' else 'FA-' + row.OPEN_YR[-2:], axis=1)
+#df_style['OPEN_SSN'] = df_style['OPEN_SSN'].apply(lambda x: x.upper())
 #df_style['CAT'] = df_style['STYLE_DESC'].apply(lambda x: '' if type(x)==np.float else 'K' if ' KS ' in x or ' KL ' in x else ('W' if ' WS ' in x or ' WL ' in x else ''))
 df_style['SLV'] = df_style['STYLE_DESC'].apply(lambda x: '' if type(x)==np.float else 'L/S' if ' KL ' in x or ' WL ' in x else ('S/S' if ' WS ' in x or ' KS ' in x else ''))
 
@@ -38,12 +39,12 @@ try:
                  ON T.STYLE = S.STYLE
                  WHEN MATCHED THEN UPDATE 
                  SET T.STYLE_DESC = S.STYLE_DESC, T.DIV=S.DIV, T.PROTO=S.PROTO, T.SIZE_RANGE_CODE = S.SIZE_RANGE, T.SLV = S.SLV,
-                 T.OPEN_SSN = S.OPEN_SSN, T.OPEN_YEAR = S.OPEN_YR, T.LABEL_CODE=S.LABEL, 
+                 T.SEASON = S.SEASON, T.LABEL_CODE=S.LABEL, 
                  T.SP=S.SP, T.ELC=S.ELC, T.ILC=S.ILC, T.BRAND_NAME=S.BRAND_NAME, 
                  T.FABRIC=S.FABRIC, T.ROYALTY = S.ROYALTY, T.PPK = S.PPK, T.CXL=0
                  WHEN NOT MATCHED BY TARGET THEN 
-                 INSERT (STYLE, STYLE_DESC, DIV, PROTO, SIZE_RANGE_CODE, OPEN_SSN, OPEN_YEAR, ILC, ELC, SP, SLV, LABEL_CODE, BRAND_NAME, FABRIC, ROYALTY, PPK) 
-                 VALUES (S.STYLE, S.STYLE_DESC, S.DIV, S.PROTO, S.SIZE_RANGE, S.OPEN_SSN, S.OPEN_YR, S.ILC, S.ELC, S.SP, S.SLV, S.LABEL, S.BRAND_NAME, S.FABRIC, S.ROYALTY, S.PPK)
+                 INSERT (STYLE, STYLE_DESC, DIV, PROTO, SIZE_RANGE_CODE, SEASON, ILC, ELC, SP, SLV, LABEL_CODE, BRAND_NAME, FABRIC, ROYALTY, PPK) 
+                 VALUES (S.STYLE, S.STYLE_DESC, S.DIV, S.PROTO, S.SIZE_RANGE, S.SEASON, S.ILC, S.ELC, S.SP, S.SLV, S.LABEL, S.BRAND_NAME, S.FABRIC, S.ROYALTY, S.PPK)
                  WHEN NOT MATCHED BY SOURCE THEN
                  UPDATE SET T.CXL = 1;""")
     conn.execute("""update T set T.REG_BT = S.SIZE, T.SLV = S.SLV from #temp_slv_and_size as S inner join dbo.STYLE_MASTER as T on T.STYLE=S.STYLE""")
