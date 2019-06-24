@@ -2,7 +2,7 @@
 """
 @author: PBu
 STATEMENT OF PURPOSE:
-this program reads the 'SIZE SCALES.xlsx' file located on U drive and upload it into SQL table SIZE_SCALE
+Run this program will read the 'SIZE SCALES.xlsx' file located on U drive and upload it into SQL table SIZE_SCALE
 """
 
 import pandas as pd

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 STATEMENT OF PURPOSE:
-    Run this program will read the 'SOURCE_HFC_ASSOC_XX-XX.csv' file located in ROYTEXDB folder and upload it into SQL table HFC_ASSOC
+    Run this program will read any file with the naming format 'SOURCE_HFC_ASSOC_XX-XX.csv' located in ROYTEXDB folder and upload them into SQL table HFC_ASSOC by season
     the source file comes from PROCOMM 10.40.45, pulled for a specific season. So that season name needs to be added to the end of the file name in the format of "SS-YY"
 PRE-REQUISITE:
-    SQL table STYLE_MASTER needs to be fully loaded
+    SQL table CUST_ORDER needs to be fully loaded
 """
 import os
 import pandas as pd
@@ -61,6 +61,3 @@ except Exception as e:
     trans.rollback()
     conn.close()
     engine.dispose()
-
-
-
