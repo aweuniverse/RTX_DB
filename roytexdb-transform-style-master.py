@@ -49,9 +49,9 @@ try:
                  UPDATE SET T.CXL = 1;""")
     conn.execute("""update T set T.REG_BT = S.SIZE, T.SLV = S.SLV from #temp_slv_and_size as S inner join dbo.STYLE_MASTER as T on T.STYLE=S.STYLE""")
     trans.commit()
-    conn.close()
-    engine.dispose()
-    print ('UPDATE COMPLETED SUCCESSFULLY!')
+#    conn.close()
+#    engine.dispose()
+    print ('STYLE_MASTER TABLE UPDATE COMPLETED SUCCESSFULLY!')
 except Exception as e:
     logger = logging.Logger('Catch_All')
     logger.error(str(e))
@@ -59,12 +59,26 @@ except Exception as e:
     conn.close()
     engine.dispose()
 
+"""
+Below code is added for data integrity check:
+    ~to verify that the season code entered in style master indeed match the season the style is ordered in
+"""
+sql_check_ssn_code = '''
+                    SELECT F.STYLE, F.HFC_SSN, S.STYLE_SSN FROM 
+                    (SELECT DISTINCT D.STYLE, H.SEASON AS HFC_SSN FROM DBO.HFC_DETAIL D JOIN DBO.HFC_HEADER H ON D.HFC_NBR = H.HFC_NBR) AS F 
+                    LEFT JOIN (SELECT STYLE, SEASON AS STYLE_SSN FROM DBO.STYLE_MASTER) AS S 
+                    ON F.STYLE = S.STYLE
+                    '''
+check_ssn_code = pd.read_sql(sql_check_ssn_code, con = conn)
+ssn_code_exception = check_ssn_code[check_ssn_code['HFC_SSN'] != check_ssn_code['STYLE_SSN']]
+if ssn_code_exception.shape[0] > 0:
+    print ('Some styles might have season code issue. Please review below data')
+    print (ssn_code_exception.reset_index(drop=True))
+else:
+    print ('All styles passed season code check')
 
-
-
-
-
-
+conn.close()
+engine.dispose()
 
 
 #import csv

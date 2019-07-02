@@ -23,13 +23,9 @@ import sys
 import logging
 
 os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
-###IMPORTANT: UPDATE BELOW STRING######
-###IMPORTANT: UPDATE BELOW STRING######
-###IMPORTANT: UPDATE BELOW STRING######
-sourcefile = 'DATASOURCE Archive\\SetOfOrders_7.1.2019.xlsx'
-###IMPORTANT: UPDATE ABOVE STRING######
-###IMPORTANT: UPDATE ABOVE STRING######
-###IMPORTANT: UPDATE ABOVE STRING######
+
+sourcefile = 'DATASOURCE Archive\\SetOfOrders_7.1.2019.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
+
 engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
 conn = engine.connect()
 
@@ -38,7 +34,7 @@ orderTabs = [each for each in wb.sheetnames if 'ALL' in each]
 assocTabs = [each for each in wb.sheetnames if 'ASSOC' in each]
 
 def oneSeasonOrder (aFile, aTab):
-    pdOrder = pd.read_excel(aFile, sheet_name=aTab, skiprows=1, header=None, usecols=[0, 2, 4, 5, 6, 7, 8, 10, 11, 13, 14, 16, 18, 19, 21, 22], 
+    pdOrder = pd.read_excel(aFile, aTab, skiprows=1, header=None, usecols=[0, 2, 4, 5, 6, 7, 8, 10, 11, 13, 14, 16, 18, 19, 21, 22], 
                           names=['DIV', 'CUST_NBR', 'CUST_PO', 'GREEN_BAR', 'ORDER_DATE', 'START_SHIP', 'CXL_SHIP', 'SEASON', 'STYLE', 'COLOR', 'SP', 'ORDERED_UNITS', 'SHIPPED_UNITS', 'SHIP_ON_DATE', 'PICK_UNITS', 'UNCONFIRMED'],
                           converters={'DIV':np.int16, 'CUST_NBR': str, 'CUST_PO': str, 'GREEN_BAR': str, 'ORDER_DATE': str, 'START_SHIP': str, 'CXL_SHIP': str, 'SEASON': str, 'STYLE': str, 'COLOR': str, 'SP': np.float64, 'ORDERED_UNITS': np.int64, 'SHIPPED_UNITS': np.int64, 'SHIP_ON_DATE': str, 'PICK_UNITS': np.int64, 'UNCONFIRMED': str})
     
@@ -58,6 +54,11 @@ def oneSeasonOrder (aFile, aTab):
     pdOrder['UNCONFIRMED'] = pdOrder['UNCONFIRMED'].apply(lambda x: 1 if x == '*' else 0)
     pdOrder['STYLE'] = pdOrder['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
     pdOrder['COLOR'] = pdOrder['COLOR'].apply(lambda x: x.zfill(3))   
+    
+    ship_date_by_po = pd.pivot_table(pdOrder, values=['SHIPPED_UNITS'], index=['GREEN_BAR', 'SHIP_ON_DATE'], aggfunc='sum').reset_index()
+    pdOrder = pd.merge(pdOrder, ship_date_by_po[['GREEN_BAR', 'SHIP_ON_DATE']], how='left', on=['GREEN_BAR'])
+    pdOrder.drop(columns=['SHIP_ON_DATE_x'], inplace=True)
+    pdOrder.rename(index=str, columns={'SHIP_ON_DATE_y': 'SHIP_ON_DATE'}, inplace=True)
     return pdOrder
 
 def multiSeasonOrder ():
@@ -109,8 +110,6 @@ def multiSeasonOrder ():
                 else 'UNCONFIRMED' if row.UNCONFIRMED == 1
                 else 'ACTIVE', axis=1)
         
-        ###ADD CODE TO IDENTIFY ORDER CATEGORY: UPFRONT, OR OFF-PRICE###
-        
         pdOrder = pdOO[(pdOO['SHIPPED'] == 0) & (pdOO['BAL'] > 0)]
         pdOrder = pdOrder[['GREEN_BAR', 'STYLE', 'COLOR', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']]
         
@@ -152,6 +151,49 @@ def multiSeasonOrder ():
             trans.rollback()
             conn.close()
             engine.dispose()
+        
+        ### BELOW BLOCK OF CODE IS ADDED TO AUTO DETERMINE IF A VALID ORDER (i.e. any order that is not purged nor de-activated) is an UPFRONT order or OFFPRICE order
+        ####################### CODE BEGINS #########################################
+        sql_identify_offprice = '''
+                                SELECT C.GREEN_BAR, C.STYLE, C.COLOR, C.CUST_NBR, C.SEASON AS ORDER_SSN, S.SEASON AS STYLE_SSN, T.SEASON AS HFC_SSN FROM DBO.CUST_ORDER C
+                                LEFT JOIN (SELECT STYLE, SEASON FROM DBO.STYLE_MASTER) AS S ON C.STYLE = S.STYLE
+                                LEFT JOIN (SELECT DISTINCT D.STYLE, H.CUST_NBR, H.SEASON FROM DBO.HFC_DETAIL D JOIN DBO.HFC_HEADER H ON D.HFC_NBR = H.HFC_NBR WHERE D.CXL = 0) AS T ON C.STYLE = T.STYLE AND C.CUST_NBR = T.CUST_NBR
+                                WHERE (C.CXL = 0 AND C.COMMENT <> 'DEACTIVE');
+                                '''
+        pd_identify = pd.read_sql(sql_identify_offprice, con=conn)
+        # OFFPRICE order selection criteria #1: if the style is labelled in a different season than the order, then it's an off-price
+#        """
+#        IMPORTANT EXCEPTION(S) applied to selection criteria #1: 
+#            1), Amazon is excluded becasue we ship to Amazon styles from old seasons - on second thought, this should be considered OFFPRICE
+#        """
+        pd_identify_3 = pd_identify[pd_identify['ORDER_SSN'] != pd_identify['STYLE_SSN']]
+        # OFFPRICE order selection criteria #2: if the style is in the same season as the season it's sold, if the style/customer combination does not exist in HFC's, then it's an off-price
+        """
+        IMPORTANT EXCEPTIONS applied to selection criteria #2: 
+            1), Haggar has two customer numbers: 42070 and 42071. They are exchangeable.
+            2), in Spring 2019 season, Shopko HFCs were written under cust# 78188 but orders were shipped under cust# 78190
+        """
+        pd_identify_2 = pd_identify[(pd_identify['ORDER_SSN'] == pd_identify['STYLE_SSN']) & (pd_identify['HFC_SSN'].isnull()) & ((pd_identify['CUST_NBR'] != '42071') & (pd_identify['CUST_NBR'] != '42070') & (pd_identify['CUST_NBR'] != '78190'))]
+
+        pd_identify_2 = pd_identify_2.append(pd_identify_3)
+        pd_identify_2['COMMENT'] = 'OFFPRICE'
+        pd_identify = pd.merge(pd_identify, pd_identify_2[['GREEN_BAR', 'STYLE', 'COLOR', 'COMMENT']], how='left', on=['GREEN_BAR', 'STYLE', 'COLOR'])
+        pd_identify['COMMENT'].fillna('UPFRONT', inplace=True)
+        
+        pd_identify[['GREEN_BAR', 'STYLE', 'COLOR', 'COMMENT']].to_sql('#temp_order_comment', con=conn, if_exists='replace', index=False)
+        trans = conn.begin()
+        try:
+            conn.execute("""UPDATE T SET T.COMMENT_2 = S.COMMENT FROM DBO.CUST_ORDER AS T INNER JOIN #temp_order_comment AS S 
+                         ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE = S.STYLE and T.COLOR = S.COLOR);""")
+            trans.commit()
+            print ('OFFPRICE and UPFRONT identifications were loaded successfully to CUST_ORDER table')
+        except Exception as e:
+            logger = logging.Logger('Catch_All')
+            logger.error(str(e))
+            trans.rollback()
+            conn.close()
+            engine.dispose()
+        ###################### CODE ENDS ############################################       
     else:
         sys.exit('There is no customer order file to read')
 
