@@ -6,6 +6,12 @@ STATEMENT OF PURPOSE:
 Note: save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx'
 PREREQUISITE:
     SQL table HFC_HEADER has to be loaded before running this program
+IMPORTANT (data pitfall):
+    due to the nature of data source being manually maintained by Import in Excel, typos are often and unpredicatable.
+    although this program built in as many data integrity checks as it could, there is one important typo it would NOT be able to catch: 
+        if a container number was initially typed as "ABCD1234567" but later changed to "ABCE1234567", or any change that was made to a container# that fit
+        the format, the program would READ THE UPDATED CONTAINER# AS A NEW CONTAINER and upload it twice.
+    it is therefore important to always run the SQL query to check total carton count to make sure it matches datasource
 """
 
 import pandas as pd
@@ -17,13 +23,12 @@ import sys
 import re
 from datetime import datetime
 
-
 """
 from excel source create a dataframe that maps to HFC_CONTAINER table
 data quality control#1: no null HFC
 """
 pd_container = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
-                             usecols=[2,3,4,5],names=['ETA', 'CONTAINER_NBR', 'HFC_NBR', 'CARTON_CTN'], converters={1: np.str, 2: np.str, 3: np.int32})
+                             usecols=[2,4,5,6],names=['ETA', 'CONTAINER_NBR', 'HFC_NBR', 'CARTON_CTN'], converters={1: np.str, 2: np.str, 3: np.int32})
 pd_container = pd_container.iloc[:-1]
 
 if sum(pd_container['HFC_NBR'].isnull()) > 0:
@@ -37,7 +42,7 @@ pd_container['ETA'] = pd_container['ETA'].fillna(method='ffill')
 pd_container['ETA'] = pd_container['ETA'].dt.date
 pd_container.reset_index(drop=True, inplace=True)
 
-
+pd_container.to_excel('test.xlsx', index=False)
 """
 data quality control#2 - read all valid HFC_NBR from SQL and make sure pd_container has one of the valid HFC numbers
 ***this requires that all the HFCs be loaded in SQL HFC_HEADER table first
@@ -58,7 +63,7 @@ from the same excel source create a dataframe that gets total carton count by co
 data quality control#3: container number fits format ^[A-Z]{4}[0-9]{7}$ if it's not AIR
 """
 pd_container_ttl = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
-                             usecols=[2,3,6],names=['ETA', 'CONTAINER_NBR', 'TTL_CTN'])
+                             usecols=[2,4,7],names=['ETA', 'CONTAINER_NBR', 'TTL_CTN'])
 pd_container_ttl = pd_container_ttl.iloc[:-1]
 pd_container_ttl.dropna(inplace=True)
 pd_container_ttl['ETA'] = pd_container_ttl['ETA'].dt.date
