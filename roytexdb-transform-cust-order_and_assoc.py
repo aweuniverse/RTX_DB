@@ -24,7 +24,7 @@ import logging
 
 os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
 
-sourcefile = 'DATASOURCE Archive\\SetOfOrders_7.1.2019.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
+sourcefile = 'DATASOURCE Archive\\SetOfOrders_7.23.2019.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
 
 engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
 conn = engine.connect()
@@ -185,6 +185,7 @@ def multiSeasonOrder ():
         try:
             conn.execute("""UPDATE T SET T.COMMENT_2 = S.COMMENT FROM DBO.CUST_ORDER AS T INNER JOIN #temp_order_comment AS S 
                          ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE = S.STYLE and T.COLOR = S.COLOR);""")
+            conn.execute("""UPDATE dbo.CUST_ORDER SET COMMENT_2 = 'UPFRONT' WHERE CUST_PO IN ('114350', '1037316');""")  ### this line was added to deal with the exception of Spring 19 Div10 Haggar PO's brought in as Fall 2019 PO's
             trans.commit()
             print ('OFFPRICE and UPFRONT identifications were loaded successfully to CUST_ORDER table')
         except Exception as e:
