@@ -11,7 +11,7 @@ IMPORTANT (data pitfall):
     although this program built in as many data integrity checks as it could, there is one important typo it would NOT be able to catch: 
         if a container number was initially typed as "ABCD1234567" but later changed to "ABCE1234567", or any change that was made to a container# that fit
         the format, the program would READ THE UPDATED CONTAINER# AS A NEW CONTAINER and upload it twice.
-    it is therefore important to always run the SQL query to check total carton count to make sure it matches datasource
+    it is therefore important to always check the total carton count that pulled back is correct at the end of the program
 """
 
 import pandas as pd
@@ -112,6 +112,11 @@ after_update = '''
                '''  
 pd_container_ttl_after = pd.read_sql(after_update, con=conn)
 
+# pull total carton count from database
+review_ttl = '''select sum(carton_ctn) as ctn from dbo.HFC_CONTAINER'''
+ttl_carton = pd.read_sql(review_ttl, con=conn)
+ttl_carton = ttl_carton.iloc[0,0]
+
 conn.close()
 engine.dispose()
 
@@ -155,8 +160,8 @@ for n in range(pd_validate.shape[0]):
         print ('WARNING: Container ' + pd_validate['CONTAINER_NBR'][n] + ' with ETA ' + pd_validate['ETA'][n].strftime('%Y-%m-%d') + ' has error!')
         sys.exit('FIX ABOVE MENTIONED ERROR(S)')
 
-
 print ('UPDATE COMPLETED SUCCESSFULLY!')
+print ('MAKE SURE TOTAL CARTON COUNT OF ' + str(ttl_carton) + ' IS CORRECT!')
 
 
 
