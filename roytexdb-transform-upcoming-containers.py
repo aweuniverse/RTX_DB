@@ -3,7 +3,9 @@
 @author: PBu
 STATEMENT OF PURPOSE:
     this program uploads the UPCOMING CONTAINERS excel file received in email from Glenda every Friday into SQL table HFC_CONTAINER
+    It also read manually maintained file 'SOURCE_CONTAINER_RECVD.xlsx' to update the RECVD indicator (1 means received)
 Note: save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx'
+        everytime a receiving is done, 'SOURCE_CONTAINER_RECVD.xlsx' needs to get updated
 PREREQUISITE:
     SQL table HFC_HEADER has to be loaded before running this program
 IMPORTANT (data pitfall):
@@ -42,7 +44,6 @@ pd_container['ETA'] = pd_container['ETA'].fillna(method='ffill')
 pd_container['ETA'] = pd_container['ETA'].dt.date
 pd_container.reset_index(drop=True, inplace=True)
 
-pd_container.to_excel('test.xlsx', index=False)
 """
 data quality control#2 - read all valid HFC_NBR from SQL and make sure pd_container has one of the valid HFC numbers
 ***this requires that all the HFCs be loaded in SQL HFC_HEADER table first
@@ -85,9 +86,13 @@ Quality control#4:
 Once HFC_CONTAINER table updated, read updated total carton count by container and compare it to the original pd_container_ttl table
 if different, raise error 
 """
+pdRec = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_CONTAINER_RECVD.xlsx', converters={1: str})
+pdRec['HFC'] = pdRec['HFC'].apply(lambda x: x.zfill(6))
+
 conn = engine.connect()
 pd_container.to_sql(name='#temp_hfc_container', con=conn, if_exists='replace', index=False)
-
+pdRec.to_sql(name='#temp_container_rec', con=conn, if_exists='replace', index=False)
+             
 trans = conn.begin()
 try:
     conn.execute("""MERGE DBO.HFC_CONTAINER AS T 
@@ -95,7 +100,8 @@ try:
                  ON (T.HFC_NBR = S.HFC_NBR and T.CONTAINER_NBR = S.CONTAINER_NBR) 
                  WHEN MATCHED THEN UPDATE SET T.CARTON_CTN=S.CARTON_CTN, T.ETA=S.ETA 
                  WHEN NOT MATCHED BY TARGET THEN 
-                 INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA);""")
+                 INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA, RECVD) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA, 0);""")
+    conn.execute("""UPDATE T SET T.RECVD = 1 FROM DBO.HFC_CONTAINER AS T JOIN #temp_container_rec AS S ON (T.CONTAINER_NBR = S.CONT AND T.HFC_NBR = S.HFC)""")
     trans.commit()
 except Exception as e:
     logger = logging.Logger('Catch_All')
