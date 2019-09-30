@@ -26,7 +26,7 @@ import logging
 
 os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
 
-sourcefile = 'DATASOURCE Archive\\SetOfOrders_9.13.2019.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
+sourcefile = 'DATASOURCE Archive\\SetOfOrders_9.27.2019.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
 
 engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
 conn = engine.connect()
@@ -154,6 +154,7 @@ def multiSeasonOrder ():
             trans.rollback()
             conn.close()
             engine.dispose()
+            sys.exit('PROGRAM STOPPED #1')
         
         ### BELOW BLOCK OF CODE IS ADDED TO AUTO DETERMINE IF A VALID ORDER (i.e. any order that is not purged nor de-activated) is an UPFRONT order or OFFPRICE order
         ####################### CODE BEGINS #########################################
@@ -197,6 +198,7 @@ def multiSeasonOrder ():
             trans.rollback()
             conn.close()
             engine.dispose()
+            sys.exit('PROGRAM STOPPED #2')
         ###################### CODE ENDS ############################################       
     else:
         sys.exit('There is no customer order file to read')
@@ -205,7 +207,8 @@ def oneSeason (aFile, aTab):
     assoc = pd.read_excel(aFile, sheet_name=aTab, skiprows=1, header=None, names=['GREEN_BAR', 'STYLE', 'COLOR', 'HFC'], usecols=[1, 3, 4, 5], converters={'GREEN_BAR': str, 'STYLE': str, 'COLOR':str, 'HFC':str})
     assoc['STYLE'] = assoc['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
     assoc['COLOR'] = assoc['COLOR'].apply(lambda x: x.zfill(3))
-    assoc['HFC'] = assoc['HFC'].apply(lambda x: x.split('-')[0].zfill(6) if pd.isnull(x) == False else x)
+    assoc['HFC'] = assoc['HFC'].apply(lambda x: x.split('-')[0].zfill(6) if pd.isnull(x) == False else '')
+    assoc['HFC'] = assoc['HFC'].apply(lambda x: x if len(x) == 6 else '')
     assoc['SEASON'] = aTab[:5].upper()    
     return assoc
 
@@ -231,6 +234,10 @@ def allSeasonAssoc ():
                          (S.GREEN_BAR, S.STYLE, S.COLOR, S.HFC, S.SEASON)
                          WHEN NOT MATCHED BY SOURCE THEN
                          UPDATE SET T.CXL=1;""")
+            # Below section of codes are updated throughout a season to correct any HFC attachment issues in PROCOMM # 
+            conn.execute ("""update dbo.HFC_ASSOC set HFC = '197218' where GREEN_BAR = '878294' AND STYLE = '138196' AND COLOR = '503';""")
+            conn.execute ("""update dbo.HFC_ASSOC set CXL = 0 where GREEN_BAR = '876766';""")
+            # Above section of codes are updated throughout a season to correct any HFC attachment issues in PROCOMM #
             trans.commit()         
             print ('HFC_ASSOC TABLE UPDATE COMPLETED SUCCESSFULLY FROM SOURCE ' + sourcefile.split("\\")[-1])
         except Exception as e:
@@ -239,6 +246,7 @@ def allSeasonAssoc ():
             trans.rollback()
             conn.close()
             engine.dispose()
+            sys.exit('PROGRAM STOPPED #3')
     else:
         sys.exit('There is no association file to read')
 
@@ -274,14 +282,14 @@ def uploadInv ():
     inv['Diff'] = inv['OH_CAL'] - inv['OH']
     exception = inv[inv['Diff'] != 0]
     if exception.shape[0] > 0:
-        print(exception)
-        choice = str(input("Please review above exception lines. IS IT OKAY TO PROCEED? ENTER 'Y' OR 'N'"))
+        exception.to_excel('ExceptionReport_ORDER_AND_INV.xlsx', index=False)
+        choice = str(input("Please review offloaded ExceptionReport_ORDER_AND_INV.xlsx. IS IT OKAY TO PROCEED? ENTER 'Y' OR 'N'"))
         if choice.upper() == 'Y':
             inv_upload = inv[['STYLE', 'COLOR_CODE', 'COLOR_DESC', 'OH', 'OH_S1', 'OH_S2', 'OH_S3', 'OH_S4', 'OH_S5', 'OH_S6', 'OH_S7', 'OH_S8']]
         else:
-            sys.exit('PROGRAM STOPPED')
             conn.close()
             engine.dispose()
+            sys.exit('PROGRAM STOPPED #4')
     else:
         print('Inventory data review passed! Proceed to uploading...')
         inv_upload = inv[['STYLE', 'COLOR_CODE', 'COLOR_DESC', 'OH', 'OH_S1', 'OH_S2', 'OH_S3', 'OH_S4', 'OH_S5', 'OH_S6', 'OH_S7', 'OH_S8']]
@@ -306,11 +314,12 @@ def uploadInv ():
         logger.error(str(e))
         trans.rollback()
         conn.close()
-        engine.dispose()                
+        engine.dispose()
+        sys.exit('PROGRAM STOPPED #5')          
     
 
-#multiSeasonOrder()
-#allSeasonAssoc()
+multiSeasonOrder()
+allSeasonAssoc()  # This module has lines added in throughout the season to manually fix HFC attachment issues in PROCOMM; update those lines as necessary
 uploadInv()
 
 conn.close()
