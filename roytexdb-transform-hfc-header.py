@@ -3,6 +3,8 @@
 @author: PBu
 STATEMENT OF PURPOSE:
     Run this program will read the 'SOURCE_BUYSUMMARY.csv' file located in the ROYTEXDB folder and upload it into SQL table HFC_HEADER
+    It will also read the "SOURCE_BUY_MAKER_ECOM.csv" file, which is manually maintained (only have seasons SPRING 19 and forward), and update the
+    MAKER and IS_ECOM fields in the HFC_HEADER table
 Note: this program will generate an ExceptionReport for 'mixed prepack' (i.e. prepack with two styles in one carton). 
       Any HFC in the exception report will have the size scale changed to 'Z9' assorted sizes
       User should review the offloaded Excel report '''ExceptionReport_HFC_HEADER.xlsx''' before choosing 'Y' or 'N' to proceed
@@ -46,8 +48,14 @@ if x.upper() == 'Y':
 else:
     sys.exit('PROGRAM STOPPED')
 
-# upload data in POheader df into SQL  
+# Read the manually maintained "SOURCE_BUY_MAKER_ECOM.csv" file
+add = pd.read_csv('SOURCE_BUY_MAKER_ECOM.csv', converters={0: str})
+add['HFC'] = add['HFC'].apply(lambda x: x.zfill(6))
+add['ECOM'].fillna(0, inplace=True)
+
+# upload data into SQL  
 POheader.to_sql('#temp_hfc_header', con=conn, if_exists='replace', index=False)
+add.to_sql('#temp_maker_ecom', con=conn, if_exists='replace', index=False)
 trans = conn.begin()
 try:
     conn.execute("""MERGE DBO.HFC_HEADER AS T 
@@ -60,6 +68,7 @@ try:
                  (S.HFC, S.X_SHIP, S.SSN, S.DIV, S.CUST_NBR, S.CARTON_SIZE, S.X_ORIENT, S.AGENT, S.COO, S.HFC_SIZE_SCALE, S.CAT)
                  WHEN NOT MATCHED BY SOURCE AND T.SEASON IN (select distinct SSN from #temp_hfc_header) THEN
                  UPDATE SET T.CXL=1;""")
+    conn.execute("""UPDATE DBO.HFC_HEADER SET MAKER = M.MAKER, IS_ECOM = M.ECOM FROM DBO.HFC_HEADER H JOIN #temp_maker_ecom M ON H.HFC_NBR = M.HFC;""")
     trans.commit()
     conn.close()
     engine.dispose()          
