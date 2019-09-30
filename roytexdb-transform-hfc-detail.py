@@ -4,9 +4,9 @@
 STATEMENT OF PURPOSE:
     This program has 3 functions. They can be run altogether or separately. 
     ***readBuySummary function:
-        will read the 'SOURCE_BUYSUMMARY.csv' file located in the ROYTEXDB folder and upload it into SQL table HFC_HEADER
+        will read the 'SOURCE_BUYSUMMARY.csv' file located in the ROYTEXDB folder and upload it into SQL table HFC_DETAIL
     ***readBuySizeBreak function:
-        will read the specified file (naming convention 'SOURCE_BUY_XX-XX.csv') and upload any HFC size break into SQL table HFC_HEADER
+        will read the specified file (naming convention 'SOURCE_BUY_XX-XX.csv') and upload any HFC size break into SQL table HFC_DETAIL
         multiple files can be run at once if calling this function multiple times
         this csv file comes from Open Order report 20.53 and filtered to only one specific season we are interested in uploading the size break for
     ***reviewSizeBreak function:
@@ -40,11 +40,11 @@ def readBuySummary():
     ##########OPTIONAL CODE BEGINS: to fix data issue in Spring '19 JCP
     ##########OPTIONAL CODE BEGINS: to fix data issue in Spring '19 JCP
     ###REMEMBER TO DEACTIVATE THIS SECTION OF CODE WHEN BUY SUMMARY NO LONGER CONTAINS SP-19
-    x = POdetail[POdetail['STYLE']=='637759']
-    y = pd.pivot_table(x, values=['UNITS'], index=['HFC', 'STYLE', 'COLOR'], aggfunc=sum).reset_index()
-    POdetail.drop_duplicates(subset=['HFC', 'STYLE', 'COLOR'], inplace=True)
-    for n in range(y.shape[0]):
-        POdetail.at[POdetail[(POdetail['HFC'] == y['HFC'][n]) & (POdetail['STYLE']=='637759')].index.values.astype(int)[0], 'UNITS'] = y['UNITS'][n]
+#    x = POdetail[POdetail['STYLE']=='637759']
+#    y = pd.pivot_table(x, values=['UNITS'], index=['HFC', 'STYLE', 'COLOR'], aggfunc=sum).reset_index()
+#    POdetail.drop_duplicates(subset=['HFC', 'STYLE', 'COLOR'], inplace=True)
+#    for n in range(y.shape[0]):
+#        POdetail.at[POdetail[(POdetail['HFC'] == y['HFC'][n]) & (POdetail['STYLE']=='637759')].index.values.astype(int)[0], 'UNITS'] = y['UNITS'][n]
     #################OPTIONAL CODE ENDS#########################
     #################OPTIONAL CODE ENDS#########################
     #################OPTIONAL CODE ENDS#########################
@@ -121,7 +121,7 @@ def reviewSizeBreak():
 
 os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
 readBuySummary()
-#readBuySizeBreak('SOURCE_BUY_SP-18.csv')
+readBuySizeBreak('SOURCE_BUY_SP-20.csv')
 #readBuySizeBreak('SOURCE_BUY_SP-19.csv')
 #readBuySizeBreak('SOURCE_BUY_FA-19_3.csv')
 reviewSizeBreak()
