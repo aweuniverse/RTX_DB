@@ -4,8 +4,9 @@
 STATEMENT OF PURPOSE:
     this program uploads the UPCOMING CONTAINERS excel file received in email from Glenda every Friday into SQL table HFC_CONTAINER
     It also read manually maintained file 'SOURCE_CONTAINER_RECVD.xlsx' to update the RECVD indicator (1 means received)
-Note: save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx'
-        everytime a receiving is done, 'SOURCE_CONTAINER_RECVD.xlsx' needs to get updated
+    It also auto calculates CTN_TO_COME based on how many cartons "should" be shipped based on (HFC_DETAIL table + SHORT_OVER table)
+Note: 1), save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx'
+      2), everytime a receiving is done, 'SOURCE_CONTAINER_RECVD.xlsx' needs to get updated
 PREREQUISITE:
     SQL table HFC_HEADER has to be loaded before running this program
 IMPORTANT (data pitfall):
@@ -102,6 +103,20 @@ try:
                  WHEN NOT MATCHED BY TARGET THEN 
                  INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA, RECVD) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA, 0);""")
     conn.execute("""UPDATE T SET T.RECVD = 1 FROM DBO.HFC_CONTAINER AS T JOIN #temp_container_rec AS S ON (T.CONTAINER_NBR = S.CONT AND T.HFC_NBR = S.HFC)""")
+    # below execution was added to automatically calculate CTN_TO_COME field 
+    # CTN_TO_COME: positive number means more to come; 0 means shipped complete; negative number means over-shipped (should not happen)
+    # code is set to look at only non-DIV8 SP-20 HFC's
+    conn.execute("""UPDATE DBO.HFC_CONTAINER
+                 SET CTN_TO_COME = T.SHIPPED_DIFF
+                 FROM DBO.HFC_CONTAINER C INNER JOIN
+                 (select D.HFC_NBR, SUM(D.TTL_QTY + ISNULL(S.DIFF, 0)) / H.CARTON_SIZE - ISNULL(C.SHIPPED_CTN,0) AS SHIPPED_DIFF
+                  from DBO.HFC_DETAIL D 
+                  JOIN DBO.HFC_HEADER H ON D.HFC_NBR = H.HFC_NBR
+                  LEFT JOIN DBO.SHORT_OVER S ON D.HFC_NBR = S.HFC AND D.STYLE=S.STYLE AND D.COLOR_CODE=S.COLOR
+                  LEFT JOIN (SELECT HFC_NBR, SUM(CARTON_CTN) AS SHIPPED_CTN FROM DBO.HFC_CONTAINER GROUP BY HFC_NBR) C ON D.HFC_NBR=C.HFC_NBR
+                  WHERE D.CXL = 0 AND H.SEASON = 'SP-20' AND H.DIV <> 8
+                  GROUP BY D.HFC_NBR, H.CARTON_SIZE, C.SHIPPED_CTN) T
+                  ON C.HFC_NBR = T.HFC_NBR""")
     trans.commit()
 except Exception as e:
     logger = logging.Logger('Catch_All')
