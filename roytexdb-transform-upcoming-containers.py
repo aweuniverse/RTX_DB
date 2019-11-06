@@ -9,6 +9,7 @@ Note: 1), save the Excel attachment to the right location 'W:\\Roytex - The Meth
       2), everytime a receiving is done, 'SOURCE_CONTAINER_RECVD.xlsx' needs to get updated
 PREREQUISITE:
     SQL table HFC_HEADER has to be loaded before running this program
+    SQL table SHORT_OVER needs to be up-to-date so that CTN_TO_COME column can calculate correctly (embedded in as a module and run at the beginning)
 IMPORTANT (data pitfall):
     due to the nature of data source being manually maintained by Import in Excel, typos are often and unpredicatable.
     although this program built in as many data integrity checks as it could, there is one important typo it would NOT be able to catch: 
@@ -19,6 +20,7 @@ IMPORTANT (data pitfall):
 
 import pandas as pd
 import numpy as np
+import os
 #import pyodbc
 import sqlalchemy
 import logging
@@ -26,11 +28,41 @@ import sys
 import re
 from datetime import datetime
 
+os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
+engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
+conn = engine.connect()
+
+"""
+as a pre-requisite, update SHORT_OVER table so later CTN_TO_COME field can be correctly calculated
+"""
+def update_short_over():
+    over = pd.read_excel('SOURCE_SHORT-OVER.xlsx', converters={0:str, 1:str, 2:str})
+    over.to_sql('#temp_over_short', con=conn, if_exists='replace', index=False)
+    trans = conn.begin()
+    try:
+        conn.execute("""
+                     MERGE DBO.SHORT_OVER AS T
+                     USING #temp_over_short AS S
+                     ON (T.HFC = S.PO AND T.STYLE = S.STYLE AND T.COLOR=S.COLOR)
+                     WHEN MATCHED THEN UPDATE SET T.DIFF = S.DIFF
+                     WHEN NOT MATCHED BY TARGET THEN
+                     INSERT (HFC, STYLE, COLOR, DIFF) VALUES (S.PO, S.STYLE, S.COLOR, S.DIFF);""")
+        trans.commit()
+        print ('SHORT_OVER TABLE UPDATED')
+    except Exception as e:
+        logger = logging.Logger('Catch_All')
+        logger.error(str(e))
+        trans.rollback()
+        conn.close()
+        engine.dispose()
+        sys.exit('ERROR ENCOUNTERED IN UPDATING SHORT_OVER TABLE')
+update_short_over()
+
 """
 from excel source create a dataframe that maps to HFC_CONTAINER table
 data quality control#1: no null HFC
 """
-pd_container = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
+pd_container = pd.read_excel('SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
                              usecols=[2,4,5,6],names=['ETA', 'CONTAINER_NBR', 'HFC_NBR', 'CARTON_CTN'], converters={1: np.str, 2: np.str, 3: np.int32})
 pd_container = pd_container.iloc[:-1]
 
@@ -49,7 +81,6 @@ pd_container.reset_index(drop=True, inplace=True)
 data quality control#2 - read all valid HFC_NBR from SQL and make sure pd_container has one of the valid HFC numbers
 ***this requires that all the HFCs be loaded in SQL HFC_HEADER table first
 """
-engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
 pd_valid_hfc = pd.read_sql_table('HFC_HEADER', con=engine, columns = ['HFC_NBR'])
 
 if sum(~pd_container['HFC_NBR'].isin(pd_valid_hfc['HFC_NBR'])) > 0:
@@ -64,7 +95,7 @@ if sum(~pd_container['HFC_NBR'].isin(pd_valid_hfc['HFC_NBR'])) > 0:
 from the same excel source create a dataframe that gets total carton count by container
 data quality control#3: container number fits format ^[A-Z]{4}[0-9]{7}$ if it's not AIR
 """
-pd_container_ttl = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
+pd_container_ttl = pd.read_excel('SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
                              usecols=[2,4,7],names=['ETA', 'CONTAINER_NBR', 'TTL_CTN'])
 pd_container_ttl = pd_container_ttl.iloc[:-1]
 pd_container_ttl.dropna(inplace=True)
@@ -87,10 +118,9 @@ Quality control#4:
 Once HFC_CONTAINER table updated, read updated total carton count by container and compare it to the original pd_container_ttl table
 if different, raise error 
 """
-pdRec = pd.read_excel('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_CONTAINER_RECVD.xlsx', converters={1: str})
+pdRec = pd.read_excel('SOURCE_CONTAINER_RECVD.xlsx', converters={1: str})
 pdRec['HFC'] = pdRec['HFC'].apply(lambda x: x.zfill(6))
 
-conn = engine.connect()
 pd_container.to_sql(name='#temp_hfc_container', con=conn, if_exists='replace', index=False)
 pdRec.to_sql(name='#temp_container_rec', con=conn, if_exists='replace', index=False)
              
@@ -105,7 +135,7 @@ try:
     conn.execute("""UPDATE T SET T.RECVD = 1 FROM DBO.HFC_CONTAINER AS T JOIN #temp_container_rec AS S ON (T.CONTAINER_NBR = S.CONT AND T.HFC_NBR = S.HFC)""")
     # below execution was added to automatically calculate CTN_TO_COME field 
     # CTN_TO_COME: positive number means more to come; 0 means shipped complete; negative number means over-shipped (should not happen)
-    # code is set to look at only non-DIV8 SP-20 HFC's
+    # code is set to look at only non-DIV8 FA-19 and SP-20 HFC's
     conn.execute("""UPDATE DBO.HFC_CONTAINER
                  SET CTN_TO_COME = T.SHIPPED_DIFF
                  FROM DBO.HFC_CONTAINER C INNER JOIN
@@ -114,7 +144,7 @@ try:
                   JOIN DBO.HFC_HEADER H ON D.HFC_NBR = H.HFC_NBR
                   LEFT JOIN DBO.SHORT_OVER S ON D.HFC_NBR = S.HFC AND D.STYLE=S.STYLE AND D.COLOR_CODE=S.COLOR
                   LEFT JOIN (SELECT HFC_NBR, SUM(CARTON_CTN) AS SHIPPED_CTN FROM DBO.HFC_CONTAINER GROUP BY HFC_NBR) C ON D.HFC_NBR=C.HFC_NBR
-                  WHERE D.CXL = 0 AND H.SEASON = 'SP-20' AND H.DIV <> 8
+                  WHERE D.CXL = 0 AND H.SEASON IN ('FA-19', 'SP-20') AND H.DIV <> 8
                   GROUP BY D.HFC_NBR, H.CARTON_SIZE, C.SHIPPED_CTN) T
                   ON C.HFC_NBR = T.HFC_NBR""")
     trans.commit()
