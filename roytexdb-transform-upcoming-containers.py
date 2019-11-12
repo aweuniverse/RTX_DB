@@ -2,11 +2,13 @@
 """
 @author: PBu
 STATEMENT OF PURPOSE:
-    this program uploads the UPCOMING CONTAINERS excel file received in email from Glenda every Friday into SQL table HFC_CONTAINER
-    It also read manually maintained file 'SOURCE_CONTAINER_RECVD.xlsx' to update the RECVD indicator (1 means received)
-    It also auto calculates CTN_TO_COME based on how many cartons "should" be shipped based on (HFC_DETAIL table + SHORT_OVER table)
+    this program uploads THREE SQL TABLES at once:
+    1), updates SHORT_OVER table using file 'SOURCE_SHORT-OVER.xlsx'. This table is being used to auto calculate CTN_TO_COME column in the HFC_CONTAINER table
+    2), updates RECEIVING table using file 'SOURCE_RECEIVING_NEW.csv'
+    3), updates HFC_CONTAINER table using the UPCOMING CONTAINERS excel file received in email from Glenda every Friday, as well as 
+        excel file 'SOURCE_RECEIVING_NEW.csv' to update RECVD and INVOICE_NBR columns
 Note: 1), save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx'
-      2), everytime a receiving is done, 'SOURCE_CONTAINER_RECVD.xlsx' needs to get updated
+      2), everytime a receiving is done, 'SOURCE_RECEIVING_NEW.csv' needs to get updated
 PREREQUISITE:
     SQL table HFC_HEADER has to be loaded before running this program
     SQL table SHORT_OVER needs to be up-to-date so that CTN_TO_COME column can calculate correctly (embedded in as a module and run at the beginning)
@@ -26,14 +28,14 @@ import sqlalchemy
 import logging
 import sys
 import re
-from datetime import datetime
+from datetime import datetime as dt
 
 os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
 engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
 conn = engine.connect()
 
 """
-as a pre-requisite, update SHORT_OVER table so later CTN_TO_COME field can be correctly calculated
+1), as a pre-requisite, update SHORT_OVER table so later CTN_TO_COME field can be correctly calculated
 """
 def update_short_over():
     over = pd.read_excel('SOURCE_SHORT-OVER.xlsx', converters={0:str, 1:str, 2:str})
@@ -57,6 +59,36 @@ def update_short_over():
         engine.dispose()
         sys.exit('ERROR ENCOUNTERED IN UPDATING SHORT_OVER TABLE')
 update_short_over()
+
+"""
+2), update RECEIVING table
+"""
+pdRec = pd.read_csv('SOURCE_RECEIVING_NEW.csv', converters={0:str, 1:str, 2: str, 3:str, 4:int, 5:int, 6:int, 7:int, 8:int, 9:int, 10:int, 11:int, 12:int, 13:int})
+pdRec['REC_DATE'] = pdRec['REC_DATE'].apply(lambda x: dt.strptime(x, '%m/%d/%Y').date())
+pdRec['HFC'] = pdRec['HFC'].apply(lambda x: x.zfill(6))
+pdRec['STYLE'] = pdRec['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
+pdRec['COLOR'] = pdRec['COLOR'].apply(lambda x: x.zfill(3))
+pdRec.to_sql('#temp_receiving', con=conn, if_exists='replace', index=False)
+trans = conn.begin()
+try:
+    conn.execute("""
+                 MERGE DBO.RECEIVING AS T
+                 USING #temp_receiving AS S
+                 ON (T.HFC_NBR = S.HFC AND T.STYLE = S.STYLE AND T.COLOR=S.COLOR AND T.CTRL_NBR=S.CTRL_NBR AND T.CONTAINER_NBR=S.CONTAINER_NBR)
+                 WHEN MATCHED THEN UPDATE SET T.REC_DATE = S.REC_DATE, T.REC_S1 = S.S1, T.REC_S2 = S.S2, T.REC_S3 = S.S3, T.REC_S4 = S.S4,
+                 T.REC_S5 = S.S5, T.REC_S6 = S.S6, T.REC_S7 = S.S7, T.REC_S8 = S.S8, T.REC_UNITS = S.REC_UNITS
+                 WHEN NOT MATCHED BY TARGET THEN
+                 INSERT (CTRL_NBR, HFC_NBR, STYLE, COLOR, CONTAINER_NBR, REC_DATE, REC_S1, REC_S2, REC_S3, REC_S4, REC_S5, REC_S6, REC_S7, REC_S8, REC_UNITS)
+                 VALUES (S.CTRL_NBR, S.HFC, S.STYLE, S.COLOR, S.CONTAINER_NBR, S.REC_DATE, S.S1, S.S2, S.S3, S.S4, S.S5, S.S6, S.S7, S.S8, S.REC_UNITS);""")
+    trans.commit()
+    print ('RECEIVING TABLE UPDATED')
+except Exception as e:
+    logger = logging.Logger('Catch_All')
+    logger.error(str(e))
+    trans.rollback()
+    conn.close()
+    engine.dispose()
+    sys.exit('ERROR ENCOUNTERED IN UPDATING RECEIVING TABLE')
 
 """
 from excel source create a dataframe that maps to HFC_CONTAINER table
@@ -118,21 +150,20 @@ Quality control#4:
 Once HFC_CONTAINER table updated, read updated total carton count by container and compare it to the original pd_container_ttl table
 if different, raise error 
 """
-pdRec = pd.read_excel('SOURCE_CONTAINER_RECVD.xlsx', converters={1: str})
-pdRec['HFC'] = pdRec['HFC'].apply(lambda x: x.zfill(6))
+pdRec_2 = pdRec[['CONTAINER_NBR', 'HFC', 'INVOICE_NBR']].dropna().drop_duplicates().reset_index(drop=True)
 
 pd_container.to_sql(name='#temp_hfc_container', con=conn, if_exists='replace', index=False)
-pdRec.to_sql(name='#temp_container_rec', con=conn, if_exists='replace', index=False)
-             
+pdRec_2.to_sql(name='#temp_container_rec', con=conn, if_exists='replace', index=False)
+            
 trans = conn.begin()
 try:
     conn.execute("""MERGE DBO.HFC_CONTAINER AS T 
                  USING dbo.#temp_hfc_container AS S 
                  ON (T.HFC_NBR = S.HFC_NBR and T.CONTAINER_NBR = S.CONTAINER_NBR) 
-                 WHEN MATCHED THEN UPDATE SET T.CARTON_CTN=S.CARTON_CTN, T.ETA=S.ETA 
+                 WHEN MATCHED THEN UPDATE SET T.CARTON_CTN=S.CARTON_CTN, T.ETA = S.ETA
                  WHEN NOT MATCHED BY TARGET THEN 
                  INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA, RECVD) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA, 0);""")
-    conn.execute("""UPDATE T SET T.RECVD = 1 FROM DBO.HFC_CONTAINER AS T JOIN #temp_container_rec AS S ON (T.CONTAINER_NBR = S.CONT AND T.HFC_NBR = S.HFC)""")
+    conn.execute("""UPDATE T SET T.RECVD = 1, T.INVOICE_NBR = S.INVOICE_NBR FROM DBO.HFC_CONTAINER AS T JOIN #temp_container_rec AS S ON (T.CONTAINER_NBR = S.CONTAINER_NBR AND T.HFC_NBR = S.HFC)""")
     # below execution was added to automatically calculate CTN_TO_COME field 
     # CTN_TO_COME: positive number means more to come; 0 means shipped complete; negative number means over-shipped (should not happen)
     # code is set to look at only non-DIV8 FA-19 and SP-20 HFC's
@@ -203,7 +234,7 @@ engine.dispose()
 #    logger.error(str(e))
 #    conn.close()
 
-pd_container_ttl_after['ETA'] = pd_container_ttl_after['ETA'].apply(lambda x: datetime.strptime(x, '%Y-%m-%d').date())
+pd_container_ttl_after['ETA'] = pd_container_ttl_after['ETA'].apply(lambda x: dt.strptime(x, '%Y-%m-%d').date())
 pd_validate = pd.merge(pd_container_ttl, pd_container_ttl_after, how='left', 
                        left_on=['CONTAINER_NBR', 'ETA'], right_on=['CONTAINER_NBR', 'ETA'])
 for n in range(pd_validate.shape[0]):
