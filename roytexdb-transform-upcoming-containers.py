@@ -4,11 +4,11 @@
 STATEMENT OF PURPOSE:
     this program uploads THREE SQL TABLES at once:
     1), updates SHORT_OVER table using file 'SOURCE_SHORT-OVER.xlsx'. This table is being used to auto calculate CTN_TO_COME column in the HFC_CONTAINER table
-    2), updates RECEIVING table using file 'SOURCE_RECEIVING_NEW.csv'
-    3), updates HFC_CONTAINER table using the UPCOMING CONTAINERS excel file received in email from Glenda every Friday, as well as 
-        excel file 'SOURCE_RECEIVING_NEW.csv' to update RECVD and INVOICE_NBR columns
+    2), updates RECEIVING table using file 'SOURCE_RECEIVING_NEW.xlsx'
+    3), updates HFC_CONTAINER table using A), UPCOMING CONTAINERS excel file received in email from Glenda every Friday
+                                          B), 'SOURCE_RECEIVING_NEW.xlsx' (2 TABS) to update RECVD, INVOICE_NBR, & WHSE_REC_DATE columns
 Note: 1), save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx'
-      2), everytime a receiving is done, 'SOURCE_RECEIVING_NEW.csv' needs to get updated
+      2), everytime a receiving is done, or Sharon sends an updated container report, 'SOURCE_RECEIVING_NEW.xlsx' needs to get updated
 PREREQUISITE:
     SQL table HFC_HEADER has to be loaded before running this program
     SQL table SHORT_OVER needs to be up-to-date so that CTN_TO_COME column can calculate correctly (embedded in as a module and run at the beginning)
@@ -63,8 +63,8 @@ update_short_over()
 """
 2), update RECEIVING table
 """
-pdRec = pd.read_csv('SOURCE_RECEIVING_NEW.csv', converters={0:str, 1:str, 2: str, 3:str, 4:int, 5:int, 6:int, 7:int, 8:int, 9:int, 10:int, 11:int, 12:int, 13:int})
-pdRec['REC_DATE'] = pdRec['REC_DATE'].apply(lambda x: dt.strptime(x, '%m/%d/%Y').date())
+pdRec = pd.read_excel('SOURCE_RECEIVING_NEW.xlsx', 'REC', converters={0:str, 1:str, 2: str, 3:str, 4:int, 5:int, 6:int, 7:int, 8:int, 9:int, 10:int, 11:int, 12:int, 13:int})
+pdRec['REC_DATE'] = pdRec['REC_DATE'].apply(lambda x: x.date())
 pdRec['HFC'] = pdRec['HFC'].apply(lambda x: x.zfill(6))
 pdRec['STYLE'] = pdRec['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
 pdRec['COLOR'] = pdRec['COLOR'].apply(lambda x: x.zfill(3))
@@ -142,7 +142,21 @@ for n in range(pd_container_ttl.shape[0]):
             print ('WARNING: CONTAINER NBR '+ pd_container_ttl['CONTAINER_NBR'][n] + ' is invalid!')
             sys.exit('FIX ABOVE MENTIONED ERROR(S)')
 
-#pd_container_ttl = pd.pivot_table(pd_container_ttl, index=['CONTAINER_NBR'], aggfunc=np.sum).reset_index()
+"""
+data quality control#5: 
+make sure containers listed on Sharon's container report are those already in HFC_CONTAINER table (i.e. Glenda's report) to prevent typos
+(No need to load any container that is AIR or FEDEX)
+"""
+distinct_container_sql = '''select distinct CONTAINER_NBR from dbo.HFC_CONTAINER'''
+distinct_container = pd.read_sql(distinct_container_sql, con=conn)
+rec_at_whse = pd.read_excel('SOURCE_RECEIVING_NEW.xlsx', 'WHSE', skiprows=1)
+rec_at_whse['WHSE_REC_DATE'] = rec_at_whse['WHSE_REC_DATE'].apply(lambda x: x.date())
+### nice syntax to check if one df includes all elements in another df
+rec_at_whse = rec_at_whse.assign(Valid=rec_at_whse.CONTAINER_NBR.isin(distinct_container.CONTAINER_NBR).astype(int))
+rec_exception = rec_at_whse[rec_at_whse['Valid'] == 0]
+if rec_exception.shape[0] != 0:
+    print(rec_exception)
+    sys.exit("Container report from Sharon has typo. Please fix above error(s)")    
 
 """
 Once all data quality checks passed, proceed to update SQL HFC_CONTAINER table
@@ -154,7 +168,8 @@ pdRec_2 = pdRec[['CONTAINER_NBR', 'HFC', 'INVOICE_NBR']].dropna().drop_duplicate
 
 pd_container.to_sql(name='#temp_hfc_container', con=conn, if_exists='replace', index=False)
 pdRec_2.to_sql(name='#temp_container_rec', con=conn, if_exists='replace', index=False)
-            
+rec_at_whse.to_sql(name='#temp_whse_container', con=conn, if_exists='replace', index=False)
+               
 trans = conn.begin()
 try:
     conn.execute("""MERGE DBO.HFC_CONTAINER AS T 
@@ -164,6 +179,7 @@ try:
                  WHEN NOT MATCHED BY TARGET THEN 
                  INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA, RECVD) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA, 0);""")
     conn.execute("""UPDATE T SET T.RECVD = 1, T.INVOICE_NBR = S.INVOICE_NBR FROM DBO.HFC_CONTAINER AS T JOIN #temp_container_rec AS S ON (T.CONTAINER_NBR = S.CONTAINER_NBR AND T.HFC_NBR = S.HFC)""")
+    conn.execute("""UPDATE T SET T.WHSE_REC_DATE = S.WHSE_REC_DATE FROM DBO.HFC_CONTAINER T JOIN #temp_whse_container S ON T.CONTAINER_NBR = S.CONTAINER_NBR""")
     # below execution was added to automatically calculate CTN_TO_COME field 
     # CTN_TO_COME: positive number means more to come; 0 means shipped complete; negative number means over-shipped (should not happen)
     # code is set to look at only non-DIV8 FA-19 and SP-20 HFC's
