@@ -10,7 +10,8 @@ STATEMENT OF PURPOSE:
 Note: 1), save the Excel attachment to the right location 'W:\\Roytex - The Method\\Ping\\ROYTEXDB\\SOURCE_UPCOMING_CONTAINERS.xlsx'
       2), everytime a receiving is done, or Sharon sends an updated container report, 'SOURCE_RECEIVING_NEW.xlsx' needs to get updated
 PREREQUISITE:
-    SQL table HFC_HEADER has to be loaded before running this program
+    SQL table HFC_HEADER has to be loaded before running this program (FK constraint)
+    SQL table INVOICE_HEADER has to have all the invoices (FK constraint)
     SQL table SHORT_OVER needs to be up-to-date so that CTN_TO_COME column can calculate correctly (embedded in as a module and run at the beginning)
 IMPORTANT (data pitfall):
     due to the nature of data source being manually maintained by Import in Excel, typos are often and unpredicatable.
@@ -64,6 +65,7 @@ update_short_over()
 2), update RECEIVING table
 """
 pdRec = pd.read_excel('SOURCE_RECEIVING_NEW.xlsx', 'REC', converters={0:str, 1:str, 2: str, 3:str, 4:int, 5:int, 6:int, 7:int, 8:int, 9:int, 10:int, 11:int, 12:int, 13:int})
+pdRec.dropna(inplace=True)
 pdRec['REC_DATE'] = pdRec['REC_DATE'].apply(lambda x: x.date())
 pdRec['HFC'] = pdRec['HFC'].apply(lambda x: x.zfill(6))
 pdRec['STYLE'] = pdRec['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
@@ -143,33 +145,15 @@ for n in range(pd_container_ttl.shape[0]):
             sys.exit('FIX ABOVE MENTIONED ERROR(S)')
 
 """
-data quality control#5: 
-make sure containers listed on Sharon's container report are those already in HFC_CONTAINER table (i.e. Glenda's report) to prevent typos
-(No need to load any container that is AIR or FEDEX)
+Once all data quality checks passed on Glenda's sheet, proceed to update the CONTAINER_NBR, HFC_NBR, CARTON_CTN, ETA, RECVD, & CTN_TO_COME columns on SQL HFC_CONTAINER table
+(THIS IS THE ONLY UPDATE THAT WILL INSERT A NEW RECORD into the HFC_CONTAINER table beause it is assumed that Glenda's sheet will have all the container/HFC BEFORE
+ a), we get any P/L or commercial invoice from overseas
+ b), we do any receivings
+ c), Sharon has the container showing received at the warehouse on her report)
 """
-distinct_container_sql = '''select distinct CONTAINER_NBR from dbo.HFC_CONTAINER'''
-distinct_container = pd.read_sql(distinct_container_sql, con=conn)
-rec_at_whse = pd.read_excel('SOURCE_RECEIVING_NEW.xlsx', 'WHSE', skiprows=1)
-rec_at_whse['WHSE_REC_DATE'] = rec_at_whse['WHSE_REC_DATE'].apply(lambda x: x.date())
-### nice syntax to check if one df includes all elements in another df
-rec_at_whse = rec_at_whse.assign(Valid=rec_at_whse.CONTAINER_NBR.isin(distinct_container.CONTAINER_NBR).astype(int))
-rec_exception = rec_at_whse[rec_at_whse['Valid'] == 0]
-if rec_exception.shape[0] != 0:
-    print(rec_exception)
-    sys.exit("Container report from Sharon has typo. Please fix above error(s)")    
-
-"""
-Once all data quality checks passed, proceed to update SQL HFC_CONTAINER table
-Quality control#4: 
-Once HFC_CONTAINER table updated, read updated total carton count by container and compare it to the original pd_container_ttl table
-if different, raise error 
-"""
-pdRec_2 = pdRec[['CONTAINER_NBR', 'HFC', 'INVOICE_NBR']].dropna().drop_duplicates().reset_index(drop=True)
-
-pd_container.to_sql(name='#temp_hfc_container', con=conn, if_exists='replace', index=False)
-pdRec_2.to_sql(name='#temp_container_rec', con=conn, if_exists='replace', index=False)
-rec_at_whse.to_sql(name='#temp_whse_container', con=conn, if_exists='replace', index=False)
-               
+pdRec_2 = pdRec[['CONTAINER_NBR', 'HFC']].drop_duplicates().reset_index(drop=True)
+pdRec_2.to_sql(name='#temp_container_rec', con=conn, if_exists='replace', index=False) ## used to update RECVD indicator
+pd_container.to_sql(name='#temp_hfc_container', con=conn, if_exists='replace', index=False) ## used to update CARTON_CTN & ETA
 trans = conn.begin()
 try:
     conn.execute("""MERGE DBO.HFC_CONTAINER AS T 
@@ -178,8 +162,7 @@ try:
                  WHEN MATCHED THEN UPDATE SET T.CARTON_CTN=S.CARTON_CTN, T.ETA = S.ETA
                  WHEN NOT MATCHED BY TARGET THEN 
                  INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA, RECVD) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA, 0);""")
-    conn.execute("""UPDATE T SET T.RECVD = 1, T.INVOICE_NBR = S.INVOICE_NBR FROM DBO.HFC_CONTAINER AS T JOIN #temp_container_rec AS S ON (T.CONTAINER_NBR = S.CONTAINER_NBR AND T.HFC_NBR = S.HFC)""")
-    conn.execute("""UPDATE T SET T.WHSE_REC_DATE = S.WHSE_REC_DATE FROM DBO.HFC_CONTAINER T JOIN #temp_whse_container S ON T.CONTAINER_NBR = S.CONTAINER_NBR""")
+    conn.execute("""UPDATE T SET T.RECVD = 1 FROM DBO.HFC_CONTAINER AS T JOIN #temp_container_rec AS S ON (T.CONTAINER_NBR = S.CONTAINER_NBR AND T.HFC_NBR = S.HFC)""")
     # below execution was added to automatically calculate CTN_TO_COME field 
     # CTN_TO_COME: positive number means more to come; 0 means shipped complete; negative number means over-shipped (should not happen)
     # code is set to look at only non-DIV8 FA-19 and SP-20 HFC's
@@ -195,13 +178,63 @@ try:
                   GROUP BY D.HFC_NBR, H.CARTON_SIZE, C.SHIPPED_CTN) T
                   ON C.HFC_NBR = T.HFC_NBR""")
     trans.commit()
+    print ('FIRST PART OF HFC_CONTAINER TABLE UPDATED')
 except Exception as e:
     logger = logging.Logger('Catch_All')
     logger.error(str(e))
     trans.rollback()
     conn.close()
     engine.dispose()
+    sys.exit('ERROR ENCOUNTERED IN UPDATING THE FIRST PART OF HFC_CONTAINER TABLE')               
 
+"""
+data quality control#4 & 5: 
+make sure containers listed on Sharon's container report are those already in HFC_CONTAINER sql table (i.e. Glenda's report) to prevent typos (No need to load any container that is AIR or FEDEX)
+make sure container/HFC combinations listed on 'REC' tab of the SOURCE_RECEIVING_NEW.xlsx that are NOT received already exist in the HFC_CONTAINER sql table
+(for those with receiving, it's possible the actual receiving will deviate from the P/L so container/HFC combo might not pre-exist)
+"""
+distinct_container_hfc_sql = '''select distinct CONTAINER_NBR, HFC_NBR from dbo.HFC_CONTAINER'''
+distinct_container_hfc = pd.read_sql(distinct_container_hfc_sql, con=conn)
+distinct_container = distinct_container_hfc[['CONTAINER_NBR']].drop_duplicates().reset_index(drop=True)
+
+rec_at_whse = pd.read_excel('SOURCE_RECEIVING_NEW.xlsx', 'WHSE', skiprows=1)
+rec_at_whse['WHSE_REC_DATE'] = rec_at_whse['WHSE_REC_DATE'].apply(lambda x: x.date())
+### nice syntax to check if one df includes all elements in another df
+rec_at_whse = rec_at_whse.assign(Valid=rec_at_whse.CONTAINER_NBR.isin(distinct_container.CONTAINER_NBR).astype(int))
+rec_exception = rec_at_whse[rec_at_whse['Valid'] == 0]
+if rec_exception.shape[0] != 0:
+    print(rec_exception)
+    sys.exit("Container report from Sharon has typo. Please fix above error(s)")    
+
+pdInvoice = pd.read_excel('SOURCE_RECEIVING_NEW.xlsx', 'REC', usecols=[0, 1, 13, 15], converters={0:str, 1:str, 3: str})
+pdInvoice = pdInvoice[pdInvoice['CTRL_NBR'].isnull()].drop(columns=['CTRL_NBR']).drop_duplicates().reset_index(drop=True)
+pdInvoice['HFC'] = pdInvoice['HFC'].apply(lambda x: x.zfill(6))
+pdInvoice = pd.merge(pdInvoice, distinct_container_hfc, how='left', left_on=['CONTAINER_NBR', 'HFC'], right_on=['CONTAINER_NBR', 'HFC_NBR'])
+pdInvoice_exception = pdInvoice[pdInvoice['HFC_NBR'].isnull()]
+if pdInvoice_exception.shape[0] != 0:
+    print(pdInvoice_exception)
+    sys.exit("Above container/HFC combos with commercial invoice do not exist in Glenda's report. Please review")
+    
+pdInvoice.to_sql(name='#temp_invoice', con=conn, if_exists='replace', index=False) ## used to update INVOICE_NBR
+rec_at_whse.to_sql(name='#temp_whse_container', con=conn, if_exists='replace', index=False) ## used to update WHSE_REC_DATE
+trans = conn.begin()
+try:
+    conn.execute("""UPDATE T SET T.INVOICE_NBR = S.INVOICE_NBR FROM DBO.HFC_CONTAINER AS T JOIN #temp_invoice AS S ON (T.CONTAINER_NBR = S.CONTAINER_NBR AND T.HFC_NBR = S.HFC)""")
+    conn.execute("""UPDATE T SET T.WHSE_REC_DATE = S.WHSE_REC_DATE FROM DBO.HFC_CONTAINER T JOIN #temp_whse_container S ON T.CONTAINER_NBR = S.CONTAINER_NBR""")
+    trans.commit()
+    print('SECOND PART OF HFC_CONTAINER TABLE UPDATED')
+except Exception as e:
+    logger = logging.Logger('Catch_All')
+    logger.error(str(e))
+    trans.rollback()
+    conn.close()
+    engine.dispose()
+    sys.exit('ERROR ENCOUNTERED IN UPDATING THE SECOND PART OF HFC_CONTAINER TABLE') 
+
+"""
+Final data quality check #6:
+Once HFC_CONTAINER table fully updated, read updated total carton count by container and compare it to the original pd_container_ttl table
+"""
 pd_container_ttl.to_sql(name='#temp_container_ttl', con=conn, if_exists='replace', index=False)
 after_update = '''
                SELECT CONTAINER_NBR, ETA, SUM (CARTON_CTN) AS TTL_CARTON 
