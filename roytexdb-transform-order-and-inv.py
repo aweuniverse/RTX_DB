@@ -26,7 +26,7 @@ import logging
 
 os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
 
-sourcefile = 'DATASOURCE Archive\\SetOfOrders_9.27.2019.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
+sourcefile = 'DATASOURCE Archive\\SetOfOrders_11.22.2019.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
 
 engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
 conn = engine.connect()
@@ -165,20 +165,19 @@ def multiSeasonOrder ():
                                 WHERE (C.CXL = 0 AND C.COMMENT <> 'DEACTIVE');
                                 '''
         pd_identify = pd.read_sql(sql_identify_offprice, con=conn)
-        # OFFPRICE order selection criteria #1: if the style is labelled in a different season than the order, then it's an off-price
-#        """
-#        IMPORTANT EXCEPTION(S) applied to selection criteria #1: 
-#            1), Amazon is excluded becasue we ship to Amazon styles from old seasons - on second thought, this should be considered OFFPRICE
-#        """
-        pd_identify_3 = pd_identify[pd_identify['ORDER_SSN'] != pd_identify['STYLE_SSN']]
-        # OFFPRICE order selection criteria #2: if the style is in the same season as the season it's sold, if the style/customer combination does not exist in HFC's, then it's an off-price
         """
-        IMPORTANT EXCEPTIONS applied to selection criteria #2: 
-            1), Haggar has two customer numbers: 42070 and 42071. They are exchangeable.
-            2), in Spring 2019 season, Shopko HFCs were written under cust# 78188 but orders were shipped under cust# 78190
+        OFFPRICE order selection criteria #1: if HFC_SSN is null, it is an OFFPRICE order; UNLESS
+        EXCEPTION: When the customer is Haggar (42070 & 42071 interchangeable) or Shopko (78188 & 78190 interchangeable)
+                    This works because we know Haggar and Shopko do not buy close-out orders; If in future this condition changes, we need to reconsider below code
         """
-        pd_identify_2 = pd_identify[(pd_identify['ORDER_SSN'] == pd_identify['STYLE_SSN']) & (pd_identify['HFC_SSN'].isnull()) & ((pd_identify['CUST_NBR'] != '42071') & (pd_identify['CUST_NBR'] != '42070') & (pd_identify['CUST_NBR'] != '78190'))]
-
+        pd_identify_3 = pd_identify[(pd_identify['HFC_SSN'].isnull()) & ((pd_identify['CUST_NBR'] != '42071') & (pd_identify['CUST_NBR'] != '42070') & (pd_identify['CUST_NBR'] != '78190'))]
+        """
+        OFFPRICE order selection criteria #2: if HFC_SSN is not null, and ORDER_SSN and HFC_SSN are different, then it is an OFFPRICE order; UNLESS
+        EXCEPTION: We have known situations where we bring Haggar orders under a different season code than its HFC (because they mix different season HFC on one PO)
+                    We need to manually add those Haggar PO numbers (CUST_PO) in the SQL line below to change them from OFFPRICE to UPFRONT
+                   ***also, originally thought about giving this exception to Amazon too (we ship older season styles to them) but changed my mind. OK to let those be labelled OFFPRICE
+        """
+        pd_identify_2 = pd_identify[(pd_identify['ORDER_SSN'] != pd_identify['HFC_SSN']) & (~pd_identify['HFC_SSN'].isnull())]
         pd_identify_2 = pd_identify_2.append(pd_identify_3)
         pd_identify_2['COMMENT'] = 'OFFPRICE'
         pd_identify = pd.merge(pd_identify, pd_identify_2[['GREEN_BAR', 'STYLE', 'COLOR', 'COMMENT']], how='left', on=['GREEN_BAR', 'STYLE', 'COLOR'])
@@ -189,7 +188,7 @@ def multiSeasonOrder ():
         try:
             conn.execute("""UPDATE T SET T.COMMENT_2 = S.COMMENT FROM DBO.CUST_ORDER AS T INNER JOIN #temp_order_comment AS S 
                          ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE = S.STYLE and T.COLOR = S.COLOR);""")
-            conn.execute("""UPDATE dbo.CUST_ORDER SET COMMENT_2 = 'UPFRONT' WHERE CUST_PO IN ('114350', '1037316');""")  ### this line was added to deal with the exception of Spring 19 Div10 Haggar PO's brought in as Fall 2019 PO's
+            conn.execute("""UPDATE dbo.CUST_ORDER SET COMMENT_2 = 'UPFRONT' WHERE CUST_PO IN ('114350', '1037316', '115040');""")  ### this line was added to deal with the previously mentioned exception of Div10 Haggar PO's brought in under different season code
             trans.commit()
             print ('OFFPRICE and UPFRONT identifications were loaded successfully to CUST_ORDER table')
         except Exception as e:
