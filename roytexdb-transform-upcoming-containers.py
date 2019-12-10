@@ -78,10 +78,10 @@ try:
                  USING #temp_receiving AS S
                  ON (T.HFC_NBR = S.HFC AND T.STYLE = S.STYLE AND T.COLOR=S.COLOR AND T.CTRL_NBR=S.CTRL_NBR AND T.CONTAINER_NBR=S.CONTAINER_NBR)
                  WHEN MATCHED THEN UPDATE SET T.REC_DATE = S.REC_DATE, T.REC_S1 = S.S1, T.REC_S2 = S.S2, T.REC_S3 = S.S3, T.REC_S4 = S.S4,
-                 T.REC_S5 = S.S5, T.REC_S6 = S.S6, T.REC_S7 = S.S7, T.REC_S8 = S.S8, T.REC_UNITS = S.REC_UNITS
+                 T.REC_S5 = S.S5, T.REC_S6 = S.S6, T.REC_S7 = S.S7, T.REC_S8 = S.S8, T.REC_UNITS = S.REC_UNITS, T.INVOICE_NBR = S.INVOICE_NBR
                  WHEN NOT MATCHED BY TARGET THEN
-                 INSERT (CTRL_NBR, HFC_NBR, STYLE, COLOR, CONTAINER_NBR, REC_DATE, REC_S1, REC_S2, REC_S3, REC_S4, REC_S5, REC_S6, REC_S7, REC_S8, REC_UNITS)
-                 VALUES (S.CTRL_NBR, S.HFC, S.STYLE, S.COLOR, S.CONTAINER_NBR, S.REC_DATE, S.S1, S.S2, S.S3, S.S4, S.S5, S.S6, S.S7, S.S8, S.REC_UNITS);""")
+                 INSERT (CTRL_NBR, HFC_NBR, STYLE, COLOR, CONTAINER_NBR, REC_DATE, REC_S1, REC_S2, REC_S3, REC_S4, REC_S5, REC_S6, REC_S7, REC_S8, REC_UNITS, INVOICE_NBR)
+                 VALUES (S.CTRL_NBR, S.HFC, S.STYLE, S.COLOR, S.CONTAINER_NBR, S.REC_DATE, S.S1, S.S2, S.S3, S.S4, S.S5, S.S6, S.S7, S.S8, S.REC_UNITS, S.INVOICE_NBR);""")
     trans.commit()
     print ('RECEIVING TABLE UPDATED')
 except Exception as e:
@@ -97,7 +97,7 @@ from excel source create a dataframe that maps to HFC_CONTAINER table
 data quality control#1: no null HFC
 """
 pd_container = pd.read_excel('SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
-                             usecols=[2,4,5,6],names=['ETA', 'CONTAINER_NBR', 'HFC_NBR', 'CARTON_CTN'], converters={1: np.str, 2: np.str, 3: np.int32})
+                             usecols=[0,2,4,5,6],names=['SHIPMENT#','ETA', 'CONTAINER_NBR', 'HFC_NBR', 'CARTON_CTN'], converters={0: np.str, 2: np.str, 3: np.str, 4: np.int32})
 pd_container = pd_container.iloc[:-1]
 
 if sum(pd_container['HFC_NBR'].isnull()) > 0:
@@ -105,6 +105,7 @@ if sum(pd_container['HFC_NBR'].isnull()) > 0:
     sys.exit('FIX ABOVE MENTIONED ERROR(S)')
 
 pd_container['HFC_NBR'] = pd_container['HFC_NBR'].apply(lambda x:x.zfill(6))
+pd_container['SHIPMENT#'] = pd_container['SHIPMENT#'].fillna(method='ffill')
 pd_container['CONTAINER_NBR'] = pd_container['CONTAINER_NBR'].fillna(method='ffill')
 pd_container['CONTAINER_NBR'] = pd_container['CONTAINER_NBR'].apply(lambda x: x.upper())
 pd_container['ETA'] = pd_container['ETA'].fillna(method='ffill')
@@ -159,9 +160,9 @@ try:
     conn.execute("""MERGE DBO.HFC_CONTAINER AS T 
                  USING dbo.#temp_hfc_container AS S 
                  ON (T.HFC_NBR = S.HFC_NBR and T.CONTAINER_NBR = S.CONTAINER_NBR) 
-                 WHEN MATCHED THEN UPDATE SET T.CARTON_CTN=S.CARTON_CTN, T.ETA = S.ETA
+                 WHEN MATCHED THEN UPDATE SET T.CARTON_CTN=S.CARTON_CTN, T.ETA = S.ETA, T.SHIPMENT_NBR = S.SHIPMENT#
                  WHEN NOT MATCHED BY TARGET THEN 
-                 INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA, RECVD) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA, 0);""")
+                 INSERT (HFC_NBR, CONTAINER_NBR, CARTON_CTN, ETA, SHIPMENT_NBR, RECVD) VALUES (S.HFC_NBR, S.CONTAINER_NBR, S.CARTON_CTN, S.ETA, S.SHIPMENT#, 0);""")
     conn.execute("""UPDATE T SET T.RECVD = 1 FROM DBO.HFC_CONTAINER AS T JOIN #temp_container_rec AS S ON (T.CONTAINER_NBR = S.CONTAINER_NBR AND T.HFC_NBR = S.HFC)""")
     # below execution was added to automatically calculate CTN_TO_COME field 
     # CTN_TO_COME: positive number means more to come; 0 means shipped complete; negative number means over-shipped (should not happen)
