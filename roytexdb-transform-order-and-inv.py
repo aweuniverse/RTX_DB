@@ -26,7 +26,7 @@ import logging
 
 os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
 
-sourcefile = 'DATASOURCE Archive\\SetOfOrders_12.10.2019_WKLY UPDATE.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
+sourcefile = 'DATASOURCE Archive\\SetOfOrders_12.17.2019_WKLY UPDATE.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
 
 engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
 conn = engine.connect()
@@ -58,10 +58,42 @@ def oneSeasonOrder (aFile, aTab):
     pdOrder['STYLE'] = pdOrder['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
     pdOrder['COLOR'] = pdOrder['COLOR'].apply(lambda x: x.zfill(3))   
     
-    ship_date_by_po = pd.pivot_table(pdOrder, values=['SHIPPED_UNITS'], index=['GREEN_BAR', 'SHIP_ON_DATE'], aggfunc='sum').reset_index()
-    pdOrder = pd.merge(pdOrder, ship_date_by_po[['GREEN_BAR', 'SHIP_ON_DATE']], how='left', on=['GREEN_BAR'])
-    pdOrder.drop(columns=['SHIP_ON_DATE_x'], inplace=True)
-    pdOrder.rename(index=str, columns={'SHIP_ON_DATE_y': 'SHIP_ON_DATE'}, inplace=True)
+#    ### Below block of code is to fill in null SHIP_ON_DATE on any lines belong to the same GREEN_BAR
+#    ### In other words, since we always ship all the lines on the same GREEN_BAR at one time, it makes no sense for some lines to stay open
+#    ### if other lines have been shipped
+#    ### This block has since become obsolete since I have a new block of code that captures more complete picture
+#    ship_date_by_po = pd.pivot_table(pdOrder, values=['SHIPPED_UNITS'], index=['GREEN_BAR', 'SHIP_ON_DATE'], aggfunc='sum').reset_index()
+#    pdOrder = pd.merge(pdOrder, ship_date_by_po[['GREEN_BAR', 'SHIP_ON_DATE']], how='left', on=['GREEN_BAR'])
+#    pdOrder.drop(columns=['SHIP_ON_DATE_x'], inplace=True)
+#    pdOrder.rename(index=str, columns={'SHIP_ON_DATE_y': 'SHIP_ON_DATE'}, inplace=True)
+    """
+    Below block of code is to fill in any null SHIP_ON_DATE on any line that satisfies:
+    Condition 1: null SHIP_ON_DATE (i.e. nothing shipped) AND
+    Condition 2: CXL_SHIP is current or in the past (5 days or fewer difference with today's date) AND
+    Condition 3: Nothing on pick AND
+    Condition 4: Other lines belong to the same customer PO that has shipped (this is necessary because we can have SHIP/CXL dates in our system that are not necessarily accurate;
+                                                                          or in cases like FORMAN MILLs we are holding orders past cancel to wait for credit approval...)
+    NOTE: Customer VF is looking at GREEN_BAR instead of CUST_PO because PROCOMM drops off the prefix when bringing in CUST_PO so different CUST_PO might appear to be the same in the datasource
+    """
+    d1=dt.now().date()
+    pdOrder['DAYS_ELAPSED'] = pdOrder['CXL_SHIP'].apply(lambda x: (x-d1).days)
+    pdOrder_shipped = pdOrder[pdOrder['SHIPPED_UNITS'] > 0]
+    Exception_Order = pdOrder[(pdOrder['DAYS_ELAPSED']<=5) & (pdOrder['PICK_UNITS'] ==0) & (pdOrder['SHIP_ON_DATE'].isnull()) & (pdOrder['CUST_NBR'] != '87376')]
+    Exception_Order_VF = pdOrder[(pdOrder['DAYS_ELAPSED']<=5) & (pdOrder['PICK_UNITS'] ==0) & (pdOrder['SHIP_ON_DATE'].isnull()) & (pdOrder['CUST_NBR'] == '87376')]
+    if Exception_Order.shape[0] > 0:
+        Shipped_by_Order = pd.pivot_table(pdOrder_shipped, values=['SHIPPED_UNITS', 'SHIP_ON_DATE'], index=['CUST_PO'], aggfunc={'SHIPPED_UNITS':'sum', 'SHIP_ON_DATE':'max'}).reset_index().rename(columns={'SHIPPED_UNITS': 'TTL_SHIPPED'})
+        Exception_Order = pd.merge(Exception_Order, Shipped_by_Order, how='left', on='CUST_PO').dropna(subset=['TTL_SHIPPED'])
+    
+    if Exception_Order_VF.shape[0] > 0:
+        Shipped_by_Greenbar = pd.pivot_table(pdOrder_shipped, values=['SHIPPED_UNITS', 'SHIP_ON_DATE'], index=['GREEN_BAR'], aggfunc={'SHIPPED_UNITS':'sum', 'SHIP_ON_DATE':'max'}).reset_index().rename(columns={'SHIPPED_UNITS': 'TTL_SHIPPED'})
+        Exception_Order_VF = pd.merge(Exception_Order_VF, Shipped_by_Greenbar, how='left', on='GREEN_BAR').dropna(subset=['TTL_SHIPPED'])
+
+    Exception_Order = Exception_Order.append(Exception_Order_VF)
+    if Exception_Order.shape[0] > 0:
+        pdOrder = pd.merge(pdOrder, Exception_Order[['GREEN_BAR', 'STYLE', 'COLOR', 'SHIP_ON_DATE_y']], how='left', on=['GREEN_BAR', 'STYLE', 'COLOR'])
+        pdOrder['SHIP_ON_DATE'] = pdOrder.apply(lambda row: row.SHIP_ON_DATE if pd.isnull(row.SHIP_ON_DATE_y) else row.SHIP_ON_DATE_y, axis=1)
+        pdOrder.drop(columns=['DAYS_ELAPSED', 'SHIP_ON_DATE_y'], inplace=True)
+
     return pdOrder
 
 def multiSeasonOrder ():
