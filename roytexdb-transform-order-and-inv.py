@@ -23,21 +23,74 @@ from datetime import datetime as dt
 import sqlalchemy
 import sys
 import logging
+import timeit
+import multiprocessing as mp
 
-os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB')
+os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\DATASOURCE Archive\\2019.12.30_WKLY UPDATE') ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
+files = os.listdir()
+orderTabs = [each for each in files if 'ALL' in each]
+assocTabs = [each for each in files if 'ASSOC' in each]
+#invTab = 'INV.csv'
 
-sourcefile = 'DATASOURCE Archive\\SetOfOrders_12.17.2019_WKLY UPDATE.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
+#cpu_count = mp.cpu_count()
+#sourcefile = 'DATASOURCE Archive\\SetOfOrders_12.23.2019.xlsx'  ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
 
 engine = sqlalchemy.create_engine("mssql+pyodbc://@sqlDSN")
 conn = engine.connect()
 
-wb = load_workbook(sourcefile, read_only=True)
-orderTabs = [each for each in wb.sheetnames if 'ALL' in each]
-assocTabs = [each for each in wb.sheetnames if 'ASSOC' in each]
-invTab = 'INV'
+#def parallelize_processing(df, func):
+#    df_split = np.array_split(df, cpu_count)
+#    pool = mp.Pool(cpu_count)
+#    df = pd.concat(pool.map(func, df_split))
+#    pool.close()
+#    pool.join()
+#    return df
+#
+#def oneSeasonOrder_preprocess(pdOrder):
+#    pdOrder['CUST_NBR'] = pdOrder['CUST_NBR'].apply(lambda x: x.zfill(5))
+#    pdOrder['CUST_PO'] = pdOrder['CUST_PO'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
+#   
+#    pdOrder['ORDER_DATE'] = pdOrder['ORDER_DATE'].apply(lambda x: dt.strptime(x, '%m/%d/%Y').date())
+#    pdOrder['START_SHIP'] = pdOrder['START_SHIP'].apply(lambda x: dt.strptime(x, '%m/%d/%Y').date())
+#    pdOrder['CXL_SHIP'] = pdOrder['CXL_SHIP'].apply(lambda x: dt.strptime(x, '%m/%d/%Y').date())
+#    pdOrder['SHIP_ON_DATE'] = pdOrder['SHIP_ON_DATE'].apply(lambda x: dt.strptime(x, '%m/%d/%Y').date() if x != '' else pd.NaT)
+#    
+#    pdOrder['SEASON'] = pdOrder['SEASON'].apply(lambda x: x[:2].upper() + '-' + x[-2:])
+#    pdOrder['UNCONFIRMED'] = pdOrder['UNCONFIRMED'].apply(lambda x: 1 if x == '*' else 0)
+#    pdOrder['STYLE'] = pdOrder['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
+#    pdOrder['COLOR'] = pdOrder['COLOR'].apply(lambda x: x.zfill(3))   
+#    
+#    d1=dt.now().date()
+#    pdOrder['DAYS_ELAPSED'] = pdOrder['CXL_SHIP'].apply(lambda x: (x-d1).days)    
+#
+#    return pdOrder
 
-def oneSeasonOrder (aFile, aTab):
-    pdOrder = pd.read_excel(aFile, aTab, skiprows=1, header=None, usecols=[0, 2, 4, 5, 6, 7, 8, 10, 11, 13, 14, 16, 18, 19, 21, 22], 
+#def oneSeasonOrder_new():
+#    df = pd.read_csv('FA-19 ALL.csv', skiprows=1, header=None, usecols=[0, 2, 4, 5, 6, 7, 8, 10, 11, 13, 14, 16, 18, 19, 21, 22], 
+#                          names=['DIV', 'CUST_NBR', 'CUST_PO', 'GREEN_BAR', 'ORDER_DATE', 'START_SHIP', 'CXL_SHIP', 'SEASON', 'STYLE', 'COLOR', 'SP', 'ORDERED_UNITS', 'SHIPPED_UNITS', 'SHIP_ON_DATE', 'PICK_UNITS', 'UNCONFIRMED'],
+#                          converters={'DIV':np.int16, 'CUST_NBR': str, 'CUST_PO': str, 'GREEN_BAR': str, 'ORDER_DATE': str, 'START_SHIP': str, 'CXL_SHIP': str, 'SEASON': str, 'STYLE': str, 'COLOR': str, 'SP': np.float64, 'ORDERED_UNITS': np.int64, 'SHIPPED_UNITS': np.int64, 'SHIP_ON_DATE': str, 'PICK_UNITS': np.int64, 'UNCONFIRMED': str})
+#    pdOrder = parallelize_processing(df, oneSeasonOrder_preprocess)
+#    pdOrder_shipped = pdOrder[pdOrder['SHIPPED_UNITS'] > 0]
+#    Exception_Order = pdOrder[(pdOrder['DAYS_ELAPSED']<=5) & (pdOrder['PICK_UNITS'] ==0) & (pdOrder['SHIP_ON_DATE'].isnull()) & (pdOrder['CUST_NBR'] != '87376')]
+#    Exception_Order_VF = pdOrder[(pdOrder['DAYS_ELAPSED']<=5) & (pdOrder['PICK_UNITS'] ==0) & (pdOrder['SHIP_ON_DATE'].isnull()) & (pdOrder['CUST_NBR'] == '87376')]
+#    if Exception_Order.shape[0] > 0:
+#        Shipped_by_Order = pd.pivot_table(pdOrder_shipped, values=['SHIPPED_UNITS', 'SHIP_ON_DATE'], index=['CUST_PO'], aggfunc={'SHIPPED_UNITS':'sum', 'SHIP_ON_DATE':'max'}).reset_index().rename(columns={'SHIPPED_UNITS': 'TTL_SHIPPED'})
+#        Exception_Order = pd.merge(Exception_Order, Shipped_by_Order, how='left', on='CUST_PO').dropna(subset=['TTL_SHIPPED'])
+#    
+#    if Exception_Order_VF.shape[0] > 0:
+#        Shipped_by_Greenbar = pd.pivot_table(pdOrder_shipped, values=['SHIPPED_UNITS', 'SHIP_ON_DATE'], index=['GREEN_BAR'], aggfunc={'SHIPPED_UNITS':'sum', 'SHIP_ON_DATE':'max'}).reset_index().rename(columns={'SHIPPED_UNITS': 'TTL_SHIPPED'})
+#        Exception_Order_VF = pd.merge(Exception_Order_VF, Shipped_by_Greenbar, how='left', on='GREEN_BAR').dropna(subset=['TTL_SHIPPED'])
+#
+#    Exception_Order = Exception_Order.append(Exception_Order_VF)
+#    if Exception_Order.shape[0] > 0:
+#        pdOrder = pd.merge(pdOrder, Exception_Order[['GREEN_BAR', 'STYLE', 'COLOR', 'SHIP_ON_DATE_y']], how='left', on=['GREEN_BAR', 'STYLE', 'COLOR'])
+#        pdOrder['SHIP_ON_DATE'] = pdOrder.apply(lambda row: row.SHIP_ON_DATE if pd.isnull(row.SHIP_ON_DATE_y) else row.SHIP_ON_DATE_y, axis=1)
+#        pdOrder.drop(columns=['DAYS_ELAPSED', 'SHIP_ON_DATE_y'], inplace=True)
+#
+#    return pdOrder
+
+def oneSeasonOrder(aFile):
+    pdOrder = pd.read_csv(aFile, skiprows=1, header=None, usecols=[0, 2, 4, 5, 6, 7, 8, 10, 11, 13, 14, 16, 18, 19, 21, 22], 
                           names=['DIV', 'CUST_NBR', 'CUST_PO', 'GREEN_BAR', 'ORDER_DATE', 'START_SHIP', 'CXL_SHIP', 'SEASON', 'STYLE', 'COLOR', 'SP', 'ORDERED_UNITS', 'SHIPPED_UNITS', 'SHIP_ON_DATE', 'PICK_UNITS', 'UNCONFIRMED'],
                           converters={'DIV':np.int16, 'CUST_NBR': str, 'CUST_PO': str, 'GREEN_BAR': str, 'ORDER_DATE': str, 'START_SHIP': str, 'CXL_SHIP': str, 'SEASON': str, 'STYLE': str, 'COLOR': str, 'SP': np.float64, 'ORDERED_UNITS': np.int64, 'SHIPPED_UNITS': np.int64, 'SHIP_ON_DATE': str, 'PICK_UNITS': np.int64, 'UNCONFIRMED': str})
     
@@ -48,10 +101,10 @@ def oneSeasonOrder (aFile, aTab):
 #    pdOrder['START_SHIP'] = pd.to_datetime(pdOrder['START_SHIP'], errors='coerce')
 #    pdOrder['CXL_SHIP'] = pd.to_datetime(pdOrder['CXL_SHIP'], errors='coerce')
 #    pdOrder['SHIP_ON_DATE'] = pd.to_datetime(pdOrder['SHIP_ON_DATE'], errors='coerce')
-    pdOrder['ORDER_DATE'] = pdOrder['ORDER_DATE'].apply(lambda x: dt.strptime(x[:10], '%Y-%m-%d').date())
-    pdOrder['START_SHIP'] = pdOrder['START_SHIP'].apply(lambda x: dt.strptime(x[:10], '%Y-%m-%d').date())
-    pdOrder['CXL_SHIP'] = pdOrder['CXL_SHIP'].apply(lambda x: dt.strptime(x[:10], '%Y-%m-%d').date())
-    pdOrder['SHIP_ON_DATE'] = pdOrder['SHIP_ON_DATE'].apply(lambda x: dt.strptime(x[:10], '%Y-%m-%d').date() if pd.isnull(x) == False else pd.NaT)
+    pdOrder['ORDER_DATE'] = pdOrder['ORDER_DATE'].apply(lambda x: dt.strptime(x, '%m/%d/%Y').date())
+    pdOrder['START_SHIP'] = pdOrder['START_SHIP'].apply(lambda x: dt.strptime(x, '%m/%d/%Y').date())
+    pdOrder['CXL_SHIP'] = pdOrder['CXL_SHIP'].apply(lambda x: dt.strptime(x, '%m/%d/%Y').date())
+    pdOrder['SHIP_ON_DATE'] = pdOrder['SHIP_ON_DATE'].apply(lambda x: dt.strptime(x, '%m/%d/%Y').date() if x != '' else pd.NaT)
     
     pdOrder['SEASON'] = pdOrder['SEASON'].apply(lambda x: x[:2].upper() + '-' + x[-2:])
     pdOrder['UNCONFIRMED'] = pdOrder['UNCONFIRMED'].apply(lambda x: 1 if x == '*' else 0)
@@ -96,7 +149,7 @@ def oneSeasonOrder (aFile, aTab):
 
     return pdOrder
 
-def multiSeasonOrder ():
+def multiSeasonOrder():
 #    fileList = [each for each in os.listdir() if each[:17] == 'SOURCE_CUST_ORDER']
 #    if len(fileList) >0:
 #        for n in range(len(fileList)):
@@ -107,17 +160,18 @@ def multiSeasonOrder ():
 #                multiSeason = multiSeason.append(addone)
 #    wb = load_workbook(sourcefile, read_only=True)
 #    orderTabs = [each for each in wb.sheetnames if 'ALL' in each]
+    multiSeason = pd.DataFrame()
     if len(orderTabs) >0:
         for n in range(len(orderTabs)):
-            if n == 0:
-                multiSeason = oneSeasonOrder(sourcefile, orderTabs[n])
-            else:
-                addone = oneSeasonOrder(sourcefile, orderTabs[n])
-                multiSeason = multiSeason.append(addone)
+#            if n == 0:
+#                multiSeason = oneSeasonOrder(orderTabs[n])
+#            else:
+#                addone = oneSeasonOrder(orderTabs[n])
+            multiSeason = multiSeason.append(oneSeasonOrder(orderTabs[n]))
 #        pdOO = pd.read_csv('SOURCE_OO.csv', skiprows=1, header=None, usecols=[4, 10, 12, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26], 
 #                   names=['GREEN_BAR', 'STYLE', 'COLOR', 'SHIPPED', 'BAL', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'], converters={4: str, 10: str, 12: str})
         try:
-            pdOO = pd.read_excel(sourcefile, sheet_name='OO', skiprows=1, header=None, usecols=[4, 10, 12, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26], 
+            pdOO = pd.read_csv('OO.csv', skiprows=1, header=None, usecols=[4, 10, 12, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26], 
                                  names=['GREEN_BAR', 'STYLE', 'COLOR', 'SHIPPED', 'BAL', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'], 
                                  converters={'GREEN_BAR': str, 'STYLE': str, 'COLOR': str})
         except:
@@ -179,7 +233,7 @@ def multiSeasonOrder ():
                          SET T.BAL_S1 = 0, T.BAL_S2 = 0, T.BAL_S3 = 0, T.BAL_S4 = 0, T.BAL_S5 = 0, T.BAL_S6 = 0, T.BAL_S7 = 0, T.BAL_S8 = 0
                          FROM DBO.CUST_ORDER AS T WHERE T.COMMENT IN ('COMPLETE', 'DEACTIVE');""")
             trans.commit()
-            print ('CUST_ORDER TABLE UPDATE COMPLETED SUCCESSFULLY FROM SOURCE ' + sourcefile.split("\\")[-1])
+            print ('CUST_ORDER TABLE UPDATE COMPLETED SUCCESSFULLY FROM FILES PULLED ON ' + os.getcwd().split("\\")[-1])
         except Exception as e:
             logger = logging.Logger('Catch_All')
             logger.error(str(e))
@@ -235,24 +289,25 @@ def multiSeasonOrder ():
     else:
         sys.exit('There is no customer order file to read')
 
-def oneSeason (aFile, aTab):
-    assoc = pd.read_excel(aFile, sheet_name=aTab, skiprows=1, header=None, names=['GREEN_BAR', 'STYLE', 'COLOR', 'HFC'], usecols=[1, 3, 4, 5], converters={'GREEN_BAR': str, 'STYLE': str, 'COLOR':str, 'HFC':str})
+def oneSeason (aFile):
+    assoc = pd.read_csv(aFile, skiprows=1, header=None, names=['GREEN_BAR', 'STYLE', 'COLOR', 'HFC'], usecols=[1, 3, 4, 5], converters={'GREEN_BAR': str, 'STYLE': str, 'COLOR':str, 'HFC':str})
     assoc['STYLE'] = assoc['STYLE'].apply(lambda x: x.zfill(6) if len(x) < 6 else x)
     assoc['COLOR'] = assoc['COLOR'].apply(lambda x: x.zfill(3))
     assoc['HFC'] = assoc['HFC'].apply(lambda x: x.split('-')[0].zfill(6) if pd.isnull(x) == False else '')
     assoc['HFC'] = assoc['HFC'].apply(lambda x: x if len(x) == 6 else '')
-    assoc['SEASON'] = aTab[:5].upper()    
+    assoc['SEASON'] = aFile[:5].upper()    
     return assoc
 
 def allSeasonAssoc ():
 #    fileList = [each for each in os.listdir() if each[:16] == 'SOURCE_HFC_ASSOC']
+    allAssoc = pd.DataFrame()
     if len(assocTabs) >0:
         for n in range(len(assocTabs)):
-            if n == 0:
-                allAssoc = oneSeason(sourcefile, assocTabs[n])
-            else:
-                addone = oneSeason(sourcefile, assocTabs[n])
-                allAssoc = allAssoc.append(addone)
+#            if n == 0:
+#                allAssoc = oneSeason(sourcefile, assocTabs[n])
+#            else:
+#                addone = oneSeason(sourcefile, assocTabs[n])
+            allAssoc = allAssoc.append(oneSeason(assocTabs[n]))
         allAssoc.to_sql('#temp_hfc_assoc', con=conn, if_exists='replace', index=False)
         trans = conn.begin()
         try:
@@ -271,7 +326,7 @@ def allSeasonAssoc ():
             conn.execute ("""update dbo.HFC_ASSOC set CXL = 0 where GREEN_BAR = '876766';""")
             # Above section of codes are updated throughout a season to correct any HFC attachment issues in PROCOMM #
             trans.commit()         
-            print ('HFC_ASSOC TABLE UPDATE COMPLETED SUCCESSFULLY FROM SOURCE ' + sourcefile.split("\\")[-1])
+            print ('HFC_ASSOC TABLE UPDATE COMPLETED SUCCESSFULLY FROM SOURCE ' + os.getcwd().split("\\")[-1])
         except Exception as e:
             logger = logging.Logger('Catch_All')
             logger.error(str(e))
@@ -283,7 +338,7 @@ def allSeasonAssoc ():
         sys.exit('There is no association file to read')
 
 def uploadInv ():
-    inv = pd.read_excel(sourcefile, invTab, skiprows=1, header=None, usecols=[7,8,9,14,19,20,21,22,23,24,25,26], names=['STYLE', 'COLOR_DESC', 'COLOR_CODE', 'OH', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'],
+    inv = pd.read_csv('INV.csv', skiprows=1, header=None, usecols=[7,8,9,14,19,20,21,22,23,24,25,26], names=['STYLE', 'COLOR_DESC', 'COLOR_CODE', 'OH', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'],
                   converters = {'STYLE': str, 'COLOR_CODE': str, 'OH': np.int32, 'S1': np.int32, 'S2': np.int32, 'S3':np.int32, 'S4':np.int32, 'S5':np.int32, 'S6':np.int32, 'S7':np.int32, 'S8':np.int32})
     inv['STYLE'] = inv['STYLE'].apply(lambda x: x.zfill(6))
     inv['COLOR_CODE'] = inv['COLOR_CODE'].apply(lambda x: x.zfill(3))
@@ -340,7 +395,7 @@ def uploadInv ():
                      WHEN NOT MATCHED BY SOURCE THEN
                      UPDATE SET T.OH = 0, T.OH_S1=0, T.OH_S2=0, T.OH_S3=0, T.OH_S4=0, T.OH_S5=0, T.OH_S6=0, T.OH_S7=0, T.OH_S8=0, T.CXL=1;""")
         trans.commit()         
-        print ('INV TABLE UPDATE COMPLETED SUCCESSFULLY FROM SOURCE ' + sourcefile.split("\\")[-1])
+        print ('INV TABLE UPDATE COMPLETED SUCCESSFULLY FROM SOURCE ' + os.getcwd().split("\\")[-1])
     except Exception as e:
         logger = logging.Logger('Catch_All')
         logger.error(str(e))
@@ -350,9 +405,13 @@ def uploadInv ():
         sys.exit('PROGRAM STOPPED #5')          
     
 
-#multiSeasonOrder()
-#allSeasonAssoc()  # This module has lines added in throughout the season to manually fix HFC attachment issues in PROCOMM; update those lines as necessary
+multiSeasonOrder()
+allSeasonAssoc()  # This module has lines added in throughout the season to manually fix HFC attachment issues in PROCOMM; update those lines as necessary
 uploadInv()
 
 conn.close()
 engine.dispose()
+#
+#elapsed = timeit.timeit(oneSeasonOrder_new, number=1)
+#print(elapsed)
+
