@@ -135,7 +135,9 @@ pd_container_ttl = pd.read_excel('SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, 
 pd_container_ttl = pd_container_ttl.iloc[:-1]
 pd_container_ttl.dropna(inplace=True)
 pd_container_ttl['ETA'] = pd_container_ttl['ETA'].dt.date
-pd_container_ttl['CONTAINER_NBR'] = pd_container_ttl['CONTAINER_NBR'].apply(lambda x: x.upper())
+#pd_container_ttl['CONTAINER_NBR'] = pd_container_ttl['CONTAINER_NBR'].apply(lambda x: x.strip().upper())
+
+pd_container_ttl['CONTAINER_NBR'] = pd_container_ttl['CONTAINER_NBR'].str.strip().str.upper()
 pd_container_ttl.reset_index(drop=True, inplace=True)
 
 pattern = re.compile('^[A-Z]{4}[0-9]{7}$')
@@ -210,6 +212,7 @@ if rec_exception.shape[0] != 0:
 pdInvoice = pd.read_excel('SOURCE_RECEIVING_NEW.xlsx', 'REC', usecols=[0, 1, 13, 15], converters={0:str, 1:str, 3: str})
 pdInvoice = pdInvoice[pdInvoice['CTRL_NBR'].isnull()].drop(columns=['CTRL_NBR']).drop_duplicates().reset_index(drop=True)
 pdInvoice['HFC'] = pdInvoice['HFC'].apply(lambda x: x.zfill(6))
+pdInvoice['CONTAINER_NBR'] = pdInvoice['CONTAINER_NBR'].str.strip()
 pdInvoice = pd.merge(pdInvoice, distinct_container_hfc, how='left', left_on=['CONTAINER_NBR', 'HFC'], right_on=['CONTAINER_NBR', 'HFC_NBR'])
 pdInvoice_exception = pdInvoice[pdInvoice['HFC_NBR'].isnull()]
 if pdInvoice_exception.shape[0] != 0:
