@@ -107,7 +107,8 @@ if sum(pd_container['HFC_NBR'].isnull()) > 0:
 pd_container['HFC_NBR'] = pd_container['HFC_NBR'].apply(lambda x:x.zfill(6))
 pd_container['SHIPMENT#'] = pd_container['SHIPMENT#'].fillna(method='ffill')
 pd_container['CONTAINER_NBR'] = pd_container['CONTAINER_NBR'].fillna(method='ffill')
-pd_container['CONTAINER_NBR'] = pd_container['CONTAINER_NBR'].apply(lambda x: x.upper())
+pd_container['CONTAINER_NBR'] = pd_container['CONTAINER_NBR'].str.strip().str.upper()
+pd_container['CONTAINER_NBR'] = pd_container['CONTAINER_NBR'].apply(lambda x: ''.join(x.split()))
 pd_container['ETA'] = pd_container['ETA'].fillna(method='ffill')
 pd_container['ETA'] = pd_container['ETA'].dt.date
 pd_container.reset_index(drop=True, inplace=True)
@@ -127,18 +128,19 @@ if sum(~pd_container['HFC_NBR'].isin(pd_valid_hfc['HFC_NBR'])) > 0:
 
 
 """
-from the same excel source create a dataframe that gets total carton count by container
+from pd_container creates a dataframe that gets total carton count by container
 data quality control#3: container number fits format ^[A-Z]{4}[0-9]{7}$ if it's not AIR
 """
-pd_container_ttl = pd.read_excel('SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
-                             usecols=[2,4,7],names=['ETA', 'CONTAINER_NBR', 'TTL_CTN'])
-pd_container_ttl = pd_container_ttl.iloc[:-1]
-pd_container_ttl.dropna(inplace=True)
-pd_container_ttl['ETA'] = pd_container_ttl['ETA'].dt.date
-#pd_container_ttl['CONTAINER_NBR'] = pd_container_ttl['CONTAINER_NBR'].apply(lambda x: x.strip().upper())
-
-pd_container_ttl['CONTAINER_NBR'] = pd_container_ttl['CONTAINER_NBR'].str.strip().str.upper()
-pd_container_ttl.reset_index(drop=True, inplace=True)
+#pd_container_ttl = pd.read_excel('SOURCE_UPCOMING_CONTAINERS.xlsx', skiprows=3, header=None, 
+#                             usecols=[2,4,7],names=['ETA', 'CONTAINER_NBR', 'TTL_CTN'])
+#pd_container_ttl = pd_container_ttl.iloc[:-1]
+#pd_container_ttl.dropna(inplace=True)
+#pd_container_ttl['ETA'] = pd_container_ttl['ETA'].dt.date
+##pd_container_ttl['CONTAINER_NBR'] = pd_container_ttl['CONTAINER_NBR'].apply(lambda x: x.strip().upper())
+#pd_container_ttl['CONTAINER_NBR'] = pd_container_ttl['CONTAINER_NBR'].str.strip().str.upper()
+#pd_container_ttl.reset_index(drop=True, inplace=True)
+pd_container_ttl = pd.pivot_table(pd_container, values='CARTON_CTN', index=['ETA', 'CONTAINER_NBR'], aggfunc=np.sum).reset_index()
+pd_container_ttl.rename(columns={'CARTON_CTN':'TTL_CTN'}, inplace=True)
 
 pattern = re.compile('^[A-Z]{4}[0-9]{7}$')
 for n in range(pd_container_ttl.shape[0]):
