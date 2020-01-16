@@ -10,7 +10,7 @@ STATEMENT OF PURPOSE:
 """
 
 import pandas as pd
-#import numpy as np
+import numpy as np
 import os
 import sqlalchemy
 import logging
@@ -25,8 +25,9 @@ def main():
     conn = engine.connect()
     
     pdHeader = pd.read_excel('SOURCE_COMMERCIAL_INVOICE.xlsx', 'INVOICE_HEADER')
-    pdDetail = pd.read_excel('SOURCE_COMMERCIAL_INVOICE.xlsx', 'INVOICE_DETAIL', usecols=[0,1,2,3,4,5], converters={0:str, 1:str, 2:str, 3:int})
+    pdDetail = pd.read_excel('SOURCE_COMMERCIAL_INVOICE.xlsx', 'INVOICE_DETAIL', usecols=[0,1,2,3,4,5,6], converters={0:str, 1:str, 2:str, 3:int})
     pdDetail['LINE_AMT'] = (pdDetail['PRICE']+pdDetail['HANGER_COST'])*pdDetail['PCS']
+    pdDetail['DUTY_FREE_LINE_AMT'] = pdDetail.apply(lambda row: 0 if np.isnan(row.DUTY_FREE_PRICE) else (row.DUTY_FREE_PRICE+row.HANGER_COST)*row.PCS, axis=1)
     
     ### data quality check - make sure HFC/STYLE listed on factory's commercial invoices are valid
     HFC_STYLE_SQL = '''select distinct HFC_NBR, STYLE from dbo.HFC_DETAIL where cxl = 0'''
@@ -73,9 +74,9 @@ def main():
                      USING #temp_invoice_detail AS S
                      ON (T.INVOICE_NBR = S.INVOICE_NBR and T.HFC=S.HFC and T.STYLE=S.STYLE)
                      WHEN MATCHED THEN UPDATE
-                     SET T.PCS=S.PCS, T.PRICE=S.PRICE, T.HANGER_COST=S.HANGER_COST, T.LINE_AMT=S.LINE_AMT
+                     SET T.PCS=S.PCS, T.PRICE=S.PRICE, T.HANGER_COST=S.HANGER_COST, T.LINE_AMT=S.LINE_AMT, T.DUTY_FREE_PRICE = S.DUTY_FREE_PRICE, T.DUTY_FREE_LINE_AMT = S.DUTY_FREE_LINE_AMT 
                      WHEN NOT MATCHED BY TARGET THEN
-                     INSERT (INVOICE_NBR, HFC, STYLE, PCS, PRICE, HANGER_COST, LINE_AMT) VALUES (S.INVOICE_NBR, S.HFC, S.STYLE, S.PCS, S.PRICE, S.HANGER_COST, S.LINE_AMT);""")
+                     INSERT (INVOICE_NBR, HFC, STYLE, PCS, PRICE, HANGER_COST, LINE_AMT, DUTY_FREE_PRICE, DUTY_FREE_LINE_AMT) VALUES (S.INVOICE_NBR, S.HFC, S.STYLE, S.PCS, S.PRICE, S.HANGER_COST, S.LINE_AMT, S.DUTY_FREE_PRICE, S.DUTY_FREE_LINE_AMT);""")
         trans.commit()
         print('INVOICE_HEADER & INVOICE_DETAIL tables have been updated')
     except Exception as e:
