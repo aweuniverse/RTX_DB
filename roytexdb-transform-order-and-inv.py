@@ -16,17 +16,17 @@ IMPORTANT:
     sourcefile string needs to be updated to reflect the correct source file location
 """
 import os
-from openpyxl import load_workbook
+#from openpyxl import load_workbook
 import pandas as pd
 import numpy as np
 from datetime import datetime as dt
 import sqlalchemy
 import sys
 import logging
-import timeit
-import multiprocessing as mp
+#import timeit
+#import multiprocessing as mp
 
-os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\DATASOURCE Archive\\2019.12.30_WKLY UPDATE') ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
+os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\DATASOURCE Archive\\2020.6.8 - MONTH CLOSE') ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
 files = os.listdir()
 orderTabs = [each for each in files if 'ALL' in each]
 assocTabs = [each for each in files if 'ASSOC' in each]
@@ -275,7 +275,7 @@ def multiSeasonOrder():
         try:
             conn.execute("""UPDATE T SET T.COMMENT_2 = S.COMMENT FROM DBO.CUST_ORDER AS T INNER JOIN #temp_order_comment AS S 
                          ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE = S.STYLE and T.COLOR = S.COLOR);""")
-            conn.execute("""UPDATE dbo.CUST_ORDER SET COMMENT_2 = 'UPFRONT' WHERE CUST_PO IN ('114350', '1037316', '115040', '50004321');""")  ### this line was added to deal with the previously mentioned exception of Div10 Haggar PO's brought in under different season code (and similar cases)
+            conn.execute("""UPDATE dbo.CUST_ORDER SET COMMENT_2 = 'UPFRONT' WHERE CUST_PO IN ('114350', '1037316', '115040', '50004321', '12162959', '12249204', '12249206');""")  ### this line was added to deal with the previously mentioned exception of Div10 Haggar PO's brought in under different season code (and similar cases)
             trans.commit()
             print ('OFFPRICE and UPFRONT identifications were loaded successfully to CUST_ORDER table')
         except Exception as e:
@@ -319,7 +319,7 @@ def allSeasonAssoc ():
                          WHEN NOT MATCHED BY TARGET THEN 
                          INSERT (GREEN_BAR, STYLE, COLOR, HFC, SEASON) VALUES
                          (S.GREEN_BAR, S.STYLE, S.COLOR, S.HFC, S.SEASON)
-                         WHEN NOT MATCHED BY SOURCE THEN
+                         WHEN NOT MATCHED BY SOURCE AND (T.SEASON IN (select distinct SEASON from #temp_hfc_assoc)) THEN
                          UPDATE SET T.CXL=1;""")
             # Below section of codes are updated throughout a season to correct any HFC attachment issues in PROCOMM # 
             conn.execute ("""update dbo.HFC_ASSOC set HFC = '197218' where GREEN_BAR = '878294' AND STYLE = '138196' AND COLOR = '503';""")
