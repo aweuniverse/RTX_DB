@@ -21,9 +21,9 @@ try:
     conn.execute("""MERGE DBO.CUSTOMER AS T 
                  USING dbo.#temp_customer AS S 
                  ON T.CUST_NBR = S.CUST_NBR
-                 WHEN MATCHED THEN UPDATE SET T.CUST_NAME = S.CUST_NAME 
+                 WHEN MATCHED THEN UPDATE SET T.CUST_NAME = S.CUST_NAME, T.AD_PCT = S.AD, T.LOAD_PCT = S.LOAD  
                  WHEN NOT MATCHED BY TARGET THEN 
-                 INSERT (CUST_NBR, CUST_NAME) VALUES (S.CUST_NBR, S.CUST_NAME);""")
+                 INSERT (CUST_NBR, CUST_NAME, AD_PCT, LOAD_PCT) VALUES (S.CUST_NBR, S.CUST_NAME, S.AD, S.LOAD);""")
     trans.commit()
     conn.close()
     engine.dispose()
