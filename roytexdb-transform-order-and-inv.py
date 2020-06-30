@@ -12,6 +12,7 @@ STATEMENT OF PURPOSE:
     IT'S IMPORTANT that all the tabs in one "SetOfOrder" file are pulled at the same time from PROCOMM
 PRE-REQUISITE:
     SQL table STYLE_MASTER and CUSTOMER need to be fully loaded
+    Also, seasonally need to update the two SQL queries used in identifying UPFRONT/OFFPRICE orders section to match the seasons being updated
 IMPORTANT:
     sourcefile string needs to be updated to reflect the correct source file location
 """
@@ -23,10 +24,11 @@ from datetime import datetime as dt
 import sqlalchemy
 import sys
 import logging
+from utilities import stopwatch
 #import timeit
 #import multiprocessing as mp
 
-os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\DATASOURCE Archive\\2020.6.8 - MONTH CLOSE') ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
+os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\DATASOURCE Archive\\2020.6.29') ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
 files = os.listdir()
 orderTabs = [each for each in files if 'ALL' in each]
 assocTabs = [each for each in files if 'ASSOC' in each]
@@ -170,6 +172,7 @@ def multiSeasonOrder():
             multiSeason = multiSeason.append(oneSeasonOrder(orderTabs[n]))
 #        pdOO = pd.read_csv('SOURCE_OO.csv', skiprows=1, header=None, usecols=[4, 10, 12, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26], 
 #                   names=['GREEN_BAR', 'STYLE', 'COLOR', 'SHIPPED', 'BAL', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'], converters={4: str, 10: str, 12: str})
+        
         try:
             pdOO = pd.read_csv('OO.csv', skiprows=1, header=None, usecols=[4, 10, 12, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26], 
                                  names=['GREEN_BAR', 'STYLE', 'COLOR', 'SHIPPED', 'BAL', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'], 
@@ -204,34 +207,68 @@ def multiSeasonOrder():
         
         pdPartial = pdOO[(pdOO['SHIPPED'] > 0) & (pdOO['BAL'] > 0)]
         pdPartial = pdPartial[['GREEN_BAR', 'STYLE', 'COLOR', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']]
-
-        newMulti.to_sql('#temp_cust_order', con=conn, if_exists='replace', index=False)
+        
+        newMulti.to_sql('#temp_cust_order', con=conn, if_exists='replace', index=False)      
         pdOrder.to_sql('#temp_full_order', con=conn, if_exists='replace', index=False)
         pdPartial.to_sql('#temp_partial_order', con=conn, if_exists='replace', index=False)
+        
+        stopwatch()
         trans = conn.begin()
-        try:
-            conn.execute("""MERGE DBO.CUST_ORDER AS T 
-                         USING dbo.#temp_cust_order AS S 
-                         ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE = S.STYLE and T.COLOR = S.COLOR)
-                         WHEN MATCHED THEN UPDATE
+        try:          
+            conn.execute("""
+                         UPDATE T
                          SET T.DIV=S.DIV, T.CUST_NBR=S.CUST_NBR, T.ORDER_DATE=S.ORDER_DATE, T.START_SHIP=S.START_SHIP, T.CXL_SHIP=S.CXL_SHIP, T.CUST_PO=S.CUST_PO, 
                          T.SEASON=S.SEASON, T.SP=S.SP, T.ORDERED_UNITS=S.ORDERED_UNITS, T.SHIPPED_UNITS=S.SHIPPED_UNITS, T.BAL_UNITS=S.BAL, T.PICK_UNITS=S.PICK_UNITS, 
-                         T.SHIP_ON_DATE = S.SHIP_ON_DATE, T.UNCONFIRMED = S.UNCONFIRMED, T.COMMENT=S.COMMENT, T.CXL=0 
-                         WHEN NOT MATCHED BY TARGET THEN 
-                         INSERT (GREEN_BAR, STYLE, COLOR, DIV, CUST_NBR, ORDER_DATE, START_SHIP, CXL_SHIP, CUST_PO, SEASON, SP, ORDERED_UNITS, SHIPPED_UNITS, BAL_UNITS, PICK_UNITS, SHIP_ON_DATE, UNCONFIRMED, COMMENT) VALUES
-                         (S.GREEN_BAR, S.STYLE, S.COLOR, S.DIV, S.CUST_NBR, S.ORDER_DATE, S.START_SHIP, S.CXL_SHIP, S.CUST_PO, S.SEASON, S.SP, S.ORDERED_UNITS, S.SHIPPED_UNITS, S.BAL, S.PICK_UNITS, S.SHIP_ON_DATE, S.UNCONFIRMED, S.COMMENT)
-                         WHEN NOT MATCHED BY SOURCE AND (T.SEASON IN (select distinct SEASON from #temp_cust_order)) THEN
-                         UPDATE SET T.CXL=1, T.BAL_UNITS = 0, T.BAL_S1 = 0, T.BAL_S2 = 0, T.BAL_S3 = 0, T.BAL_S4 = 0, T.BAL_S5 = 0, T.BAL_S6 = 0, T.BAL_S7 = 0, T.BAL_S8 =0;""")
+                         T.SHIP_ON_DATE = S.SHIP_ON_DATE, T.UNCONFIRMED = S.UNCONFIRMED, T.COMMENT=S.COMMENT, T.CXL=0
+                         FROM DBO.CUST_ORDER AS T INNER JOIN #temp_cust_order as S ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE = S.STYLE and T.COLOR = S.COLOR)
+                         """)
+            stopwatch(text='update 1 cost {} seconds')
+            
+            conn.execute("""
+                         INSERT INTO DBO.CUST_ORDER
+                         (GREEN_BAR, STYLE, COLOR, DIV, CUST_NBR, ORDER_DATE, START_SHIP, CXL_SHIP, CUST_PO, SEASON, SP, ORDERED_UNITS, SHIPPED_UNITS, BAL_UNITS, PICK_UNITS, SHIP_ON_DATE, UNCONFIRMED, COMMENT)
+                         SELECT S.GREEN_BAR, S.STYLE, S.COLOR, S.DIV, S.CUST_NBR, S.ORDER_DATE, S.START_SHIP, S.CXL_SHIP, S.CUST_PO, S.SEASON, S.SP, S.ORDERED_UNITS, S.SHIPPED_UNITS, S.BAL, S.PICK_UNITS, S.SHIP_ON_DATE, S.UNCONFIRMED, S.COMMENT
+                         FROM dbo.#temp_cust_order S
+                         WHERE NOT EXISTS (SELECT 1 FROM DBO.CUST_ORDER T WHERE T.GREEN_BAR = S.GREEN_BAR AND T.STYLE=S.STYLE AND T.COLOR=S.COLOR) 
+                         """)
+            stopwatch(text='update 2 cost {} seconds')
+            
+            conn.execute("""
+                         UPDATE T
+                         SET T.CXL=1, T.BAL_UNITS = 0, T.BAL_S1 = 0, T.BAL_S2 = 0, T.BAL_S3 = 0, T.BAL_S4 = 0, T.BAL_S5 = 0, T.BAL_S6 = 0, T.BAL_S7 = 0, T.BAL_S8=0
+                         FROM DBO.CUST_ORDER T
+                         WHERE NOT EXISTS (SELECT 1 FROM dbo.#temp_cust_order S WHERE T.GREEN_BAR = S.GREEN_BAR AND T.STYLE=S.STYLE AND T.COLOR=S.COLOR)
+                         AND T.SEASON IN (select distinct SEASON from #temp_cust_order)
+                         """)
+            stopwatch(text='update 3 cost {} seconds')
+#           conn.execute("""MERGE DBO.CUST_ORDER AS T 
+#                         USING dbo.#temp_cust_order AS S 
+#                         ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE = S.STYLE and T.COLOR = S.COLOR)
+#                         WHEN MATCHED THEN UPDATE
+#                         SET T.DIV=S.DIV, T.CUST_NBR=S.CUST_NBR, T.ORDER_DATE=S.ORDER_DATE, T.START_SHIP=S.START_SHIP, T.CXL_SHIP=S.CXL_SHIP, T.CUST_PO=S.CUST_PO, 
+#                         T.SEASON=S.SEASON, T.SP=S.SP, T.ORDERED_UNITS=S.ORDERED_UNITS, T.SHIPPED_UNITS=S.SHIPPED_UNITS, T.BAL_UNITS=S.BAL, T.PICK_UNITS=S.PICK_UNITS, 
+#                         T.SHIP_ON_DATE = S.SHIP_ON_DATE, T.UNCONFIRMED = S.UNCONFIRMED, T.COMMENT=S.COMMENT, T.CXL=0 
+#                         WHEN NOT MATCHED BY TARGET THEN 
+#                         INSERT (GREEN_BAR, STYLE, COLOR, DIV, CUST_NBR, ORDER_DATE, START_SHIP, CXL_SHIP, CUST_PO, SEASON, SP, ORDERED_UNITS, SHIPPED_UNITS, BAL_UNITS, PICK_UNITS, SHIP_ON_DATE, UNCONFIRMED, COMMENT) VALUES
+#                         (S.GREEN_BAR, S.STYLE, S.COLOR, S.DIV, S.CUST_NBR, S.ORDER_DATE, S.START_SHIP, S.CXL_SHIP, S.CUST_PO, S.SEASON, S.SP, S.ORDERED_UNITS, S.SHIPPED_UNITS, S.BAL, S.PICK_UNITS, S.SHIP_ON_DATE, S.UNCONFIRMED, S.COMMENT)
+#                         WHEN NOT MATCHED BY SOURCE AND (T.SEASON IN (select distinct SEASON from #temp_cust_order)) THEN
+#                         UPDATE SET T.CXL=1, T.BAL_UNITS = 0, T.BAL_S1 = 0, T.BAL_S2 = 0, T.BAL_S3 = 0, T.BAL_S4 = 0, T.BAL_S5 = 0, T.BAL_S6 = 0, T.BAL_S7 = 0, T.BAL_S8 =0;""")
             conn.execute("""UPDATE T
                          SET T.ORDERED_S1 = S.S1, T.ORDERED_S2 = S.S2, T.ORDERED_S3 = S.S3, T.ORDERED_S4 = S.S4, T.ORDERED_S5 = S.S5, T.ORDERED_S6 = S.S6, T.ORDERED_S7 = S.S7, T.ORDERED_S8 = S.S8, 
                          T.BAL_S1 = S.S1, T.BAL_S2 = S.S2, T.BAL_S3 = S.S3, T.BAL_S4 = S.S4, T.BAL_S5 = S.S5, T.BAL_S6 = S.S6, T.BAL_S7 = S.S7, T.BAL_S8 = S.S8
                          FROM DBO.CUST_ORDER AS T INNER JOIN #temp_full_order AS S ON (S.GREEN_BAR = T.GREEN_BAR and S.STYLE = T.STYLE and S.COLOR = T.COLOR);""") 
+            stopwatch(text='update 4 cost {} seconds')
+            
             conn.execute("""UPDATE T
                          SET T.BAL_S1 = S.S1, T.BAL_S2 = S.S2, T.BAL_S3 = S.S3, T.BAL_S4 = S.S4, T.BAL_S5 = S.S5, T.BAL_S6 = S.S6, T.BAL_S7 = S.S7, T.BAL_S8 = S.S8
                          FROM DBO.CUST_ORDER AS T INNER JOIN #temp_partial_order AS S ON (S.GREEN_BAR = T.GREEN_BAR and S.STYLE = T.STYLE and S.COLOR = T.COLOR);""")
+            stopwatch(text='update 5 cost {} seconds')
+            
             conn.execute("""UPDATE T
                          SET T.BAL_S1 = 0, T.BAL_S2 = 0, T.BAL_S3 = 0, T.BAL_S4 = 0, T.BAL_S5 = 0, T.BAL_S6 = 0, T.BAL_S7 = 0, T.BAL_S8 = 0
                          FROM DBO.CUST_ORDER AS T WHERE T.COMMENT IN ('COMPLETE', 'DEACTIVE');""")
+            stopwatch(text='update 6 cost {} seconds')
+
             trans.commit()
             print ('CUST_ORDER TABLE UPDATE COMPLETED SUCCESSFULLY FROM FILES PULLED ON ' + os.getcwd().split("\\")[-1])
         except Exception as e:
@@ -244,40 +281,86 @@ def multiSeasonOrder():
         
         ### BELOW BLOCK OF CODE IS ADDED TO AUTO DETERMINE IF A VALID ORDER (i.e. any order that is not purged nor de-activated) is an UPFRONT order or OFFPRICE order
         ####################### CODE BEGINS #########################################
-        sql_identify_offprice = '''
-                                SELECT C.GREEN_BAR, C.STYLE, C.COLOR, C.CUST_NBR, C.SEASON AS ORDER_SSN, S.SEASON AS STYLE_SSN, T.SEASON AS HFC_SSN FROM DBO.CUST_ORDER C
-                                LEFT JOIN (SELECT STYLE, SEASON FROM DBO.STYLE_MASTER) AS S ON C.STYLE = S.STYLE
-                                LEFT JOIN (SELECT DISTINCT D.STYLE, H.CUST_NBR, H.SEASON FROM DBO.HFC_DETAIL D JOIN DBO.HFC_HEADER H ON D.HFC_NBR = H.HFC_NBR WHERE D.CXL = 0) AS T ON C.STYLE = T.STYLE AND C.CUST_NBR = T.CUST_NBR
-                                WHERE (C.CXL = 0 AND C.COMMENT <> 'DEACTIVE');
-                                '''
-        pd_identify = pd.read_sql(sql_identify_offprice, con=conn)
-        """
-        OFFPRICE order selection criteria #1: if HFC_SSN is null, it is an OFFPRICE order; UNLESS
-        EXCEPTION: When the customer is Haggar (42070 & 42071 interchangeable) or Shopko (78188 & 78190 interchangeable)
-                    This works because we know Haggar and Shopko do not buy close-out orders; If in future this condition changes, we need to reconsider below code
-        """
-        pd_identify_3 = pd_identify[(pd_identify['HFC_SSN'].isnull()) & ((pd_identify['CUST_NBR'] != '42071') & (pd_identify['CUST_NBR'] != '42070') & (pd_identify['CUST_NBR'] != '78190'))]
-        """
-        OFFPRICE order selection criteria #2: if HFC_SSN is not null, and ORDER_SSN and HFC_SSN are different, then it is an OFFPRICE order; UNLESS
-        EXCEPTION: We have known situations where we bring Haggar orders under a different season code than its HFC (because they mix different season HFC on one PO)
-                    We need to manually add those Haggar PO numbers (CUST_PO) in the SQL line below to change them from OFFPRICE to UPFRONT
-                    Also any similar situation (one season's HFC taken in a later season's customer PO) should be handled likewise
-                   ***also, originally thought about giving this exception to Amazon too (we ship older season styles to them) but changed my mind. OK to let those be labelled OFFPRICE
-        """
-        pd_identify_2 = pd_identify[(pd_identify['ORDER_SSN'] != pd_identify['HFC_SSN']) & (~pd_identify['HFC_SSN'].isnull())]
-        pd_identify_2 = pd_identify_2.append(pd_identify_3)
-        pd_identify_2['COMMENT'] = 'OFFPRICE'
-        pd_identify = pd.merge(pd_identify, pd_identify_2[['GREEN_BAR', 'STYLE', 'COLOR', 'COMMENT']], how='left', on=['GREEN_BAR', 'STYLE', 'COLOR'])
-        pd_identify['COMMENT'].fillna('UPFRONT', inplace=True)
+        # 6/29/2020: updated the rules to differentiate between UPFRONT and OFFPRICE
+        # The rule looks at the customer associated with a PO against customer(s) associated with the styles on that same PO
+        # If PO customer matches style customer then it's UPFRONT; otherwise OFFPRICE
+        # in backtesting this rule provides to be a much more robust rule as it's not always true that customers take their upfront buys in the same season
+        # sometimes the timing difference could be multiple seasons (such as AAFES took SP-19 in SP-20; Kohls took FA-19 in SP-20)      
+        sql_1 = '''
+                SELECT T1.CUST_PO, T1.STYLE, T1.PO_CUST, ISNULL(T2.STYLE_CUST, 'OLD') AS STYLE_CUST
+                FROM (
+                SELECT DISTINCT C.STYLE, 
+                CASE
+                	WHEN C.CUST_NBR = '61050' THEN LEFT(C.CUST_PO, 7)
+                	ELSE C.CUST_PO
+                	END AS CUST_PO,
+                CASE 
+                	WHEN M.CUST_NAME = 'SHOPKO (OLD)' THEN 'SHOPKO'
+                	WHEN M.CUST_NAME = 'JCP.COM' THEN 'JCP'
+                	ELSE M.CUST_NAME
+                	END AS PO_CUST
+                FROM DBO.CUST_ORDER C
+                JOIN DBO.CUSTOMER M ON C.CUST_NBR=M.CUST_NBR
+                WHERE C.CXL = 0 AND C.COMMENT <> 'DEACTIVE' AND C.SEASON IN ('SP-20', 'FA-20', 'FA-19')
+                ) T1
+                LEFT JOIN (
+                SELECT DISTINCT D.STYLE,
+                CASE 
+                	WHEN M.CUST_NAME = 'SHOPKO (OLD)' THEN 'SHOPKO'
+                	WHEN M.CUST_NAME = 'JCP.COM' THEN 'JCP'
+                	ELSE M.CUST_NAME
+                END AS STYLE_CUST
+                FROM DBO.HFC_DETAIL D
+                JOIN DBO.HFC_HEADER H ON D.HFC_NBR=H.HFC_NBR
+                JOIN DBO.CUSTOMER M ON H.CUST_NBR=M.CUST_NBR
+                WHERE D.CXL = 0 AND H.DIV <> 8
+                ) AS T2
+                ON T1.STYLE = T2.STYLE
+                ORDER BY 1, 2
+                '''
+        pd_identify = pd.read_sql(sql_1, con=conn)
+        pd_identify['PO-STYLE'] = pd_identify['CUST_PO'] + pd_identify['STYLE']
+        pd_count = pd.pivot_table(pd_identify, values=['STYLE'], index=['PO-STYLE'], aggfunc={'STYLE': 'count'}).reset_index()
+        pd_count.rename(columns={'STYLE':'COUNT'}, inplace=True)
+        pd_identify = pd.merge(pd_identify, pd_count, how='left', on=['PO-STYLE'])
+        pd_duplicate = pd_identify[pd_identify['COUNT'] != 1]
+        if pd_duplicate.shape[0] > 1:              ### anything falls into this pd_duplicate dataframe means it's a style that's associated with multiple customer names
+            pd_duplicate['DEL'] = 1
+            found = ""
+            for n in range(pd_duplicate.shape[0]):
+                if (pd_duplicate['STYLE_CUST'].iloc[n] == pd_duplicate['PO_CUST'].iloc[n]):
+                    pd_duplicate['DEL'].iloc[n] = 0
+                    found = pd_duplicate['PO-STYLE'].iloc[n]
+                else:
+                    try:
+                        if (pd_duplicate['PO-STYLE'].iloc[n] != pd_duplicate['PO-STYLE'].iloc[n+1]) and (pd_duplicate['PO-STYLE'].iloc[n] != found):
+                            pd_duplicate['DEL'].iloc[n] = 0
+                    except IndexError:
+                        if pd_duplicate['PO-STYLE'].iloc[n] != found:
+                            pd_duplicate['DEL'].iloc[n] = 0
+            drop_index = pd_duplicate[pd_duplicate['DEL'] == 1].index.to_list()
+            pd_identify.drop(drop_index, inplace=True)
+        pd_identify['CUST_DIFF'] = pd_identify.apply(lambda row: 0 if row.PO_CUST == row.STYLE_CUST else 1, axis = 1)
+        pd_final = pd.pivot_table(pd_identify, values=['CUST_DIFF'], index=['CUST_PO'], aggfunc={'CUST_DIFF': 'sum'}).reset_index()
+        pd_final['COMMENT_2'] = pd_final['CUST_DIFF'].apply(lambda x: 'UPFRONT' if x==0 else 'OFFPRICE')
         
-        pd_identify[['GREEN_BAR', 'STYLE', 'COLOR', 'COMMENT']].to_sql('#temp_order_comment', con=conn, if_exists='replace', index=False)
+        sql_2 = '''
+                SELECT GREEN_BAR, STYLE, COLOR, 
+                CASE WHEN CUST_NBR = '61050' THEN LEFT(CUST_PO, 7) ELSE CUST_PO END AS CUST_PO
+                FROM DBO.CUST_ORDER WHERE CXL = 0 AND COMMENT <> 'DEACTIVE' AND SEASON IN ('SP-20', 'FA-20', 'FA-19')
+                '''
+        pd_all = pd.read_sql(sql_2, con=conn)
+        pd_all = pd.merge(pd_all, pd_final[['CUST_PO', 'COMMENT_2']], how='left', on='CUST_PO')
+
+        pd_all.to_sql('#temp_comment2', con=conn, if_exists='replace', index=False)
         trans = conn.begin()
         try:
-            conn.execute("""UPDATE T SET T.COMMENT_2 = S.COMMENT FROM DBO.CUST_ORDER AS T INNER JOIN #temp_order_comment AS S 
-                         ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE = S.STYLE and T.COLOR = S.COLOR);""")
-            conn.execute("""UPDATE dbo.CUST_ORDER SET COMMENT_2 = 'UPFRONT' WHERE CUST_PO IN ('114350', '1037316', '115040', '50004321', '12162959', '12249204', '12249206');""")  ### this line was added to deal with the previously mentioned exception of Div10 Haggar PO's brought in under different season code (and similar cases)
+            conn.execute("""
+                         UPDATE T
+                         SET T.COMMENT_2 = S.COMMENT_2 FROM DBO.CUST_ORDER AS T INNER JOIN #temp_comment2 AS S ON (T.GREEN_BAR = S.GREEN_BAR AND T.STYLE=S.STYLE AND T.COLOR=S.COLOR);
+                         """)
             trans.commit()
-            print ('OFFPRICE and UPFRONT identifications were loaded successfully to CUST_ORDER table')
+            print ('OFFPRICE and UPFRONT identifications were loaded successfully to CUST_ORDER table FOR THE SEASONS SPECIFIED IN SQL QUERIES')
         except Exception as e:
             logger = logging.Logger('Catch_All')
             logger.error(str(e))
@@ -285,7 +368,51 @@ def multiSeasonOrder():
             conn.close()
             engine.dispose()
             sys.exit('PROGRAM STOPPED #2')
-        ###################### CODE ENDS ############################################       
+       
+#        sql_identify_offprice = '''
+#                                SELECT C.GREEN_BAR, C.STYLE, C.COLOR, C.CUST_NBR, C.SEASON AS ORDER_SSN, S.SEASON AS STYLE_SSN, T.SEASON AS HFC_SSN FROM DBO.CUST_ORDER C
+#                                LEFT JOIN (SELECT STYLE, SEASON FROM DBO.STYLE_MASTER) AS S ON C.STYLE = S.STYLE
+#                                LEFT JOIN (SELECT DISTINCT D.STYLE, H.CUST_NBR, H.SEASON FROM DBO.HFC_DETAIL D JOIN DBO.HFC_HEADER H ON D.HFC_NBR = H.HFC_NBR WHERE D.CXL = 0) AS T ON C.STYLE = T.STYLE AND C.CUST_NBR = T.CUST_NBR
+#                                WHERE (C.CXL = 0 AND C.COMMENT <> 'DEACTIVE');
+#                                '''
+#        pd_identify = pd.read_sql(sql_identify_offprice, con=conn)
+#        """
+#        OFFPRICE order selection criteria #1: if HFC_SSN is null, it is an OFFPRICE order; UNLESS
+#        EXCEPTION: When the customer is Haggar (42070 & 42071 interchangeable) or Shopko (78188 & 78190 interchangeable)
+#                    This works because we know Haggar and Shopko do not buy close-out orders; If in future this condition changes, we need to reconsider below code
+#        """
+#        pd_identify_3 = pd_identify[(pd_identify['HFC_SSN'].isnull()) & ((pd_identify['CUST_NBR'] != '42071') & (pd_identify['CUST_NBR'] != '42070') & (pd_identify['CUST_NBR'] != '78190'))]
+#        """
+#        OFFPRICE order selection criteria #2: if HFC_SSN is not null, and ORDER_SSN and HFC_SSN are different, then it is an OFFPRICE order; UNLESS
+#        EXCEPTION: We have known situations where we bring Haggar orders under a different season code than its HFC (because they mix different season HFC on one PO)
+#                    We need to manually add those Haggar PO numbers (CUST_PO) in the SQL line below to change them from OFFPRICE to UPFRONT
+#                    Also any similar situation (one season's HFC taken in a later season's customer PO) should be handled likewise
+#                   ***also, originally thought about giving this exception to Amazon too (we ship older season styles to them) but changed my mind. OK to let those be labelled OFFPRICE
+#        """
+#        pd_identify_2 = pd_identify[(pd_identify['ORDER_SSN'] != pd_identify['HFC_SSN']) & (~pd_identify['HFC_SSN'].isnull())]
+#        pd_identify_2 = pd_identify_2.append(pd_identify_3)
+#        pd_identify_2['COMMENT'] = 'OFFPRICE'
+#        pd_identify = pd.merge(pd_identify, pd_identify_2[['GREEN_BAR', 'STYLE', 'COLOR', 'COMMENT']], how='left', on=['GREEN_BAR', 'STYLE', 'COLOR'])
+#        pd_identify['COMMENT'].fillna('UPFRONT', inplace=True)
+#        
+#        pd_identify[['GREEN_BAR', 'STYLE', 'COLOR', 'COMMENT']].to_sql('#temp_order_comment', con=conn, if_exists='replace', index=False)
+#        trans = conn.begin()
+#        try:
+#            conn.execute("""UPDATE T SET T.COMMENT_2 = S.COMMENT FROM DBO.CUST_ORDER AS T INNER JOIN #temp_order_comment AS S 
+#                         ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE = S.STYLE and T.COLOR = S.COLOR);""")
+#            conn.execute("""UPDATE dbo.CUST_ORDER SET COMMENT_2 = 'UPFRONT' WHERE CUST_PO IN ('114350', '1037316', '115040', '50004321', '12162959', '12249204', '12249206');""")  ### this line was added to deal with the previously mentioned exception of Div10 Haggar PO's brought in under different season code (and similar cases)
+#            trans.commit()
+#            print ('OFFPRICE and UPFRONT identifications were loaded successfully to CUST_ORDER table')
+#        except Exception as e:
+#            logger = logging.Logger('Catch_All')
+#            logger.error(str(e))
+#            trans.rollback()
+#            conn.close()
+#            engine.dispose()
+#            sys.exit('PROGRAM STOPPED #2')
+
+        ###################### CODE ENDS ############################################
+        stopwatch(text='update 7 cost {} seconds')
     else:
         sys.exit('There is no customer order file to read')
 
@@ -311,16 +438,33 @@ def allSeasonAssoc ():
         allAssoc.to_sql('#temp_hfc_assoc', con=conn, if_exists='replace', index=False)
         trans = conn.begin()
         try:
-            conn.execute("""MERGE DBO.HFC_ASSOC AS T 
-                         USING dbo.#temp_hfc_assoc AS S 
-                         ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE=S.STYLE and T.COLOR=S.COLOR) 
-                         WHEN MATCHED THEN UPDATE
+            conn.execute("""
+                         UPDATE T
                          SET T.HFC=S.HFC, T.SEASON=S.SEASON, T.CXL=0
-                         WHEN NOT MATCHED BY TARGET THEN 
-                         INSERT (GREEN_BAR, STYLE, COLOR, HFC, SEASON) VALUES
-                         (S.GREEN_BAR, S.STYLE, S.COLOR, S.HFC, S.SEASON)
-                         WHEN NOT MATCHED BY SOURCE AND (T.SEASON IN (select distinct SEASON from #temp_hfc_assoc)) THEN
-                         UPDATE SET T.CXL=1;""")
+                         FROM DBO.HFC_ASSOC AS T INNER JOIN dbo.#temp_hfc_assoc AS S ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE=S.STYLE and T.COLOR=S.COLOR);
+                         """)
+            conn.execute("""
+                         INSERT INTO DBO.HFC_ASSOC
+                         (GREEN_BAR, STYLE, COLOR, HFC, SEASON)
+                         SELECT S.GREEN_BAR, S.STYLE, S.COLOR, S.HFC, S.SEASON FROM dbo.#temp_hfc_assoc AS S
+                         WHERE NOT EXISTS (SELECT 1 FROM DBO.HFC_ASSOC T WHERE (T.GREEN_BAR = S.GREEN_BAR and T.STYLE=S.STYLE and T.COLOR=S.COLOR));
+                         """)
+            conn.execute("""
+                         UPDATE T
+                         SET T.CXL = 1
+                         FROM DBO.HFC_ASSOC AS T WHERE NOT EXISTS (SELECT 1 FROM dbo.#temp_hfc_assoc AS S WHERE (T.GREEN_BAR = S.GREEN_BAR and T.STYLE=S.STYLE and T.COLOR=S.COLOR))
+                         AND T.SEASON IN (select distinct SEASON from #temp_hfc_assoc);
+                         """)
+#            conn.execute("""MERGE DBO.HFC_ASSOC AS T 
+#                         USING dbo.#temp_hfc_assoc AS S 
+#                         ON (T.GREEN_BAR = S.GREEN_BAR and T.STYLE=S.STYLE and T.COLOR=S.COLOR) 
+#                         WHEN MATCHED THEN UPDATE
+#                         SET T.HFC=S.HFC, T.SEASON=S.SEASON, T.CXL=0
+#                         WHEN NOT MATCHED BY TARGET THEN 
+#                         INSERT (GREEN_BAR, STYLE, COLOR, HFC, SEASON) VALUES
+#                         (S.GREEN_BAR, S.STYLE, S.COLOR, S.HFC, S.SEASON)
+#                         WHEN NOT MATCHED BY SOURCE AND (T.SEASON IN (select distinct SEASON from #temp_hfc_assoc)) THEN
+#                         UPDATE SET T.CXL=1;""")
             # Below section of codes are updated throughout a season to correct any HFC attachment issues in PROCOMM # 
             conn.execute ("""update dbo.HFC_ASSOC set HFC = '197218' where GREEN_BAR = '878294' AND STYLE = '138196' AND COLOR = '503';""")
             conn.execute ("""update dbo.HFC_ASSOC set CXL = 0 where GREEN_BAR = '876766';""")
@@ -334,6 +478,7 @@ def allSeasonAssoc ():
             conn.close()
             engine.dispose()
             sys.exit('PROGRAM STOPPED #3')
+        stopwatch(text='update 8 cost {} seconds')
     else:
         sys.exit('There is no association file to read')
 
@@ -402,7 +547,8 @@ def uploadInv ():
         trans.rollback()
         conn.close()
         engine.dispose()
-        sys.exit('PROGRAM STOPPED #5')          
+        sys.exit('PROGRAM STOPPED #5')      
+    stopwatch(text='update 9 cost {} seconds', end=True)
     
 
 multiSeasonOrder()
