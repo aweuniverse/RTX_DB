@@ -28,7 +28,7 @@ from utilities import stopwatch
 #import timeit
 #import multiprocessing as mp
 
-os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\DATASOURCE Archive\\2020.6.29') ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
+os.chdir('W:\\Roytex - The Method\\Ping\\ROYTEXDB\\DATASOURCE Archive\\2020.7.14 - INVOICE UPDATE') ###IMPORTANT: UPDATE THIS FILE LOCATION STRING######
 files = os.listdir()
 orderTabs = [each for each in files if 'ALL' in each]
 assocTabs = [each for each in files if 'ASSOC' in each]
@@ -130,24 +130,25 @@ def oneSeasonOrder(aFile):
                                                                           or in cases like FORMAN MILLs we are holding orders past cancel to wait for credit approval...)
     NOTE: Customer VF is looking at GREEN_BAR instead of CUST_PO because PROCOMM drops off the prefix when bringing in CUST_PO so different CUST_PO might appear to be the same in the datasource
     """
-    d1=dt.now().date()
-    pdOrder['DAYS_ELAPSED'] = pdOrder['CXL_SHIP'].apply(lambda x: (x-d1).days)
     pdOrder_shipped = pdOrder[pdOrder['SHIPPED_UNITS'] > 0]
-    Exception_Order = pdOrder[(pdOrder['DAYS_ELAPSED']<=5) & (pdOrder['PICK_UNITS'] ==0) & (pdOrder['SHIP_ON_DATE'].isnull()) & (pdOrder['CUST_NBR'] != '87376')]
-    Exception_Order_VF = pdOrder[(pdOrder['DAYS_ELAPSED']<=5) & (pdOrder['PICK_UNITS'] ==0) & (pdOrder['SHIP_ON_DATE'].isnull()) & (pdOrder['CUST_NBR'] == '87376')]
-    if Exception_Order.shape[0] > 0:
-        Shipped_by_Order = pd.pivot_table(pdOrder_shipped, values=['SHIPPED_UNITS', 'SHIP_ON_DATE'], index=['CUST_PO'], aggfunc={'SHIPPED_UNITS':'sum', 'SHIP_ON_DATE':'max'}).reset_index().rename(columns={'SHIPPED_UNITS': 'TTL_SHIPPED'})
-        Exception_Order = pd.merge(Exception_Order, Shipped_by_Order, how='left', on='CUST_PO').dropna(subset=['TTL_SHIPPED'])
+    if pdOrder_shipped.shape[0] > 0:
+        d1=dt.now().date()
+        pdOrder['DAYS_ELAPSED'] = pdOrder['CXL_SHIP'].apply(lambda x: (x-d1).days)   
+        Exception_Order = pdOrder[(pdOrder['DAYS_ELAPSED']<=5) & (pdOrder['PICK_UNITS'] ==0) & (pdOrder['SHIP_ON_DATE'].isnull()) & (pdOrder['CUST_NBR'] != '87376')]
+        Exception_Order_VF = pdOrder[(pdOrder['DAYS_ELAPSED']<=5) & (pdOrder['PICK_UNITS'] ==0) & (pdOrder['SHIP_ON_DATE'].isnull()) & (pdOrder['CUST_NBR'] == '87376')]
+        if Exception_Order.shape[0] > 0:
+            Shipped_by_Order = pd.pivot_table(pdOrder_shipped, values=['SHIPPED_UNITS', 'SHIP_ON_DATE'], index=['CUST_PO'], aggfunc={'SHIPPED_UNITS':'sum', 'SHIP_ON_DATE':'max'}).reset_index().rename(columns={'SHIPPED_UNITS': 'TTL_SHIPPED'})
+            Exception_Order = pd.merge(Exception_Order, Shipped_by_Order, how='left', on='CUST_PO').dropna(subset=['TTL_SHIPPED'])
+        
+        if Exception_Order_VF.shape[0] > 0:
+            Shipped_by_Greenbar = pd.pivot_table(pdOrder_shipped, values=['SHIPPED_UNITS', 'SHIP_ON_DATE'], index=['GREEN_BAR'], aggfunc={'SHIPPED_UNITS':'sum', 'SHIP_ON_DATE':'max'}).reset_index().rename(columns={'SHIPPED_UNITS': 'TTL_SHIPPED'})
+            Exception_Order_VF = pd.merge(Exception_Order_VF, Shipped_by_Greenbar, how='left', on='GREEN_BAR').dropna(subset=['TTL_SHIPPED'])
     
-    if Exception_Order_VF.shape[0] > 0:
-        Shipped_by_Greenbar = pd.pivot_table(pdOrder_shipped, values=['SHIPPED_UNITS', 'SHIP_ON_DATE'], index=['GREEN_BAR'], aggfunc={'SHIPPED_UNITS':'sum', 'SHIP_ON_DATE':'max'}).reset_index().rename(columns={'SHIPPED_UNITS': 'TTL_SHIPPED'})
-        Exception_Order_VF = pd.merge(Exception_Order_VF, Shipped_by_Greenbar, how='left', on='GREEN_BAR').dropna(subset=['TTL_SHIPPED'])
-
-    Exception_Order = Exception_Order.append(Exception_Order_VF)
-    if Exception_Order.shape[0] > 0:
-        pdOrder = pd.merge(pdOrder, Exception_Order[['GREEN_BAR', 'STYLE', 'COLOR', 'SHIP_ON_DATE_y']], how='left', on=['GREEN_BAR', 'STYLE', 'COLOR'])
-        pdOrder['SHIP_ON_DATE'] = pdOrder.apply(lambda row: row.SHIP_ON_DATE if pd.isnull(row.SHIP_ON_DATE_y) else row.SHIP_ON_DATE_y, axis=1)
-        pdOrder.drop(columns=['DAYS_ELAPSED', 'SHIP_ON_DATE_y'], inplace=True)
+        Exception_Order = Exception_Order.append(Exception_Order_VF)
+        if Exception_Order.shape[0] > 0:
+            pdOrder = pd.merge(pdOrder, Exception_Order[['GREEN_BAR', 'STYLE', 'COLOR', 'SHIP_ON_DATE_y']], how='left', on=['GREEN_BAR', 'STYLE', 'COLOR'])
+            pdOrder['SHIP_ON_DATE'] = pdOrder.apply(lambda row: row.SHIP_ON_DATE if pd.isnull(row.SHIP_ON_DATE_y) else row.SHIP_ON_DATE_y, axis=1)
+            pdOrder.drop(columns=['DAYS_ELAPSED', 'SHIP_ON_DATE_y'], inplace=True)
 
     return pdOrder
 
@@ -301,7 +302,7 @@ def multiSeasonOrder():
                 	END AS PO_CUST
                 FROM DBO.CUST_ORDER C
                 JOIN DBO.CUSTOMER M ON C.CUST_NBR=M.CUST_NBR
-                WHERE C.CXL = 0 AND C.COMMENT <> 'DEACTIVE' AND C.SEASON IN ('SP-20', 'FA-20', 'FA-19')
+                WHERE C.CXL = 0 AND C.COMMENT <> 'DEACTIVE' AND C.SEASON IN ('SP-20', 'FA-20')
                 ) T1
                 LEFT JOIN (
                 SELECT DISTINCT D.STYLE,
@@ -347,7 +348,7 @@ def multiSeasonOrder():
         sql_2 = '''
                 SELECT GREEN_BAR, STYLE, COLOR, 
                 CASE WHEN CUST_NBR = '61050' THEN LEFT(CUST_PO, 7) ELSE CUST_PO END AS CUST_PO
-                FROM DBO.CUST_ORDER WHERE CXL = 0 AND COMMENT <> 'DEACTIVE' AND SEASON IN ('SP-20', 'FA-20', 'FA-19')
+                FROM DBO.CUST_ORDER WHERE CXL = 0 AND COMMENT <> 'DEACTIVE' AND SEASON IN ('SP-20', 'FA-20')
                 '''
         pd_all = pd.read_sql(sql_2, con=conn)
         pd_all = pd.merge(pd_all, pd_final[['CUST_PO', 'COMMENT_2']], how='left', on='CUST_PO')
